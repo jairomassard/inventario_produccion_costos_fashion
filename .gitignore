@@ -1,0 +1,48 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node.js / Frontend
+node_modules
+.DS_Store
+/dist  # Cambiado a /dist para que solo afecte la raíz
+dist-ssr
+coverage
+*.local
+/cypress/videos/
+/cypress/screenshots/
+
+# Excepción para backend/static/dist
+!backend/static/dist
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.tsbuildinfo
+
+# Python / Backend
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+env_inventarios
+env_inventarios/
+venv/
+*.env
+
+# Base de datos y temporales
+*.sql
+*.bak
