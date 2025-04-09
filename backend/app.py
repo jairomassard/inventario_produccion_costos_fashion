@@ -4511,8 +4511,10 @@ def create_app():
             pdf.setFont("Helvetica-Bold", 10)
             if tiene_cierre_forzado:
                 pdf.drawString(50, y, "Cierre Forzado")
-            else:
+            elif orden.estado == "Finalizada":
                 pdf.drawString(50, y, "Orden Finalizada sin Novedad")
+            else:
+                pdf.drawString(50, y, "Orden en Proceso de Producción")
             y -= 15
 
             # Mostrar el comentario (si lo hay) en texto normal
@@ -4714,8 +4716,10 @@ def create_app():
             pdf.setFont("Helvetica-Bold", 10)
             if tiene_cierre_forzado:
                 pdf.drawString(50, y, "Cierre Forzado")
-            else:
+            elif orden.estado == "Finalizada":
                 pdf.drawString(50, y, "Orden Finalizada sin Novedad")
+            else:
+                pdf.drawString(50, y, "Orden en Proceso de Producción")
             y -= 15
 
             if tiene_cierre_forzado:
