@@ -7,7 +7,7 @@
       <button @click="limpiarPagina" class="btn btn-warning">Limpiar Página</button>
     </div>
 
-    <!-- Filtro y Botón Consultar Inventario -->
+    <!-- Filtros de búsqueda -->
     <div>
       <div>
         <label for="nombreFiltro">Buscar por nombre:</label>
@@ -39,33 +39,33 @@
           </option>
         </select>
       </div>
-      
+      <!-- Filtro por estado movido arriba -->
+      <div>
+        <label for="filtroEstado">Filtrar por Estado:</label>
+        <select v-model="filtroEstado" id="filtroEstado" @change="consultar">
+          <option value="">Todos</option>
+          <option value="verde">Verde (OK)</option>
+          <option value="amarillo">Amarillo (Advertencia)</option>
+          <option value="rojo">Rojo (Crítico)</option>
+        </select>
+      </div>
       <div>
         <button @click="consultar">Consultar Inventario</button>
       </div>
     </div>
 
-    <!-- Filtro por Bodega -->
-    <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === ''">
+    <!-- Filtros adicionales para consulta general -->
+    <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === '' && nombreDigitado === ''">
       <label for="filtroBodega">Filtrar por bodega:</label>
       <select v-model="filtroBodega" id="filtroBodega" @change="filtrarPorBodega">
         <option value="">Todas</option>
         <option v-for="bodega in bodegas" :key="bodega" :value="bodega">{{ bodega }}</option>
       </select>
     </div>
-    <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === ''">
-          <label for="umbralAlerta">Umbral de Alerta (unidades):</label>
-          <input v-model.number="umbralAlerta" id="umbralAlerta" type="number" min="0" value="10" />
-      </div>
-      <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === ''">
-          <label for="filtroEstado">Filtrar por Estado:</label>
-          <select v-model="filtroEstado" id="filtroEstado" @change="filtrarPorEstado">
-              <option value="">Todos</option>
-              <option value="verde">Verde (OK)</option>
-              <option value="amarillo">Amarillo (Advertencia)</option>
-              <option value="rojo">Rojo (Crítico)</option>
-          </select>
-      </div>
+    <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === '' && nombreDigitado === ''">
+      <label for="umbralAlerta">Umbral de Alerta (%):</label>
+      <input v-model.number="umbralAlerta" id="umbralAlerta" type="number" min="0" max="100" step="1" />
+    </div>
 
     <!-- Tabla Resumen de Costos (solo para consulta general) -->
     <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === '' && nombreDigitado === ''">
@@ -99,6 +99,7 @@
           <tr>
             <th>Código</th>
             <th>Nombre</th>
+            <th>Stock Mínimo</th> <!-- Nueva columna -->
             <th>Total</th>
             <th>Estado</th>
             <template v-for="bodega in bodegasMostradas" :key="bodega">
@@ -111,10 +112,11 @@
           <tr v-for="producto in productosFiltrados" :key="producto.codigo">
             <td>{{ producto.codigo }}</td>
             <td>{{ producto.nombre }}</td>
+            <td>{{ producto.stock_minimo !== null ? producto.stock_minimo : '-' }}</td> <!-- Mostrar stock_minimo -->
             <td>{{ producto.cantidad_total }}</td>
             <td>
               <span v-if="producto.stock_minimo !== null && producto.stock_minimo !== undefined">
-                <span v-if="Number(producto.cantidad_total) > Number(producto.stock_minimo) + Number(umbralAlerta)" class="estado verde">✔</span>
+                <span v-if="Number(producto.cantidad_total) > Number(producto.stock_minimo) * (1 + Number(umbralAlerta) / 100)" class="estado verde">✔</span>
                 <span v-else-if="Number(producto.cantidad_total) > Number(producto.stock_minimo)" class="estado amarillo">⚠</span>
                 <span v-else class="estado rojo">✖</span>
               </span>
@@ -127,313 +129,317 @@
           </tr>
         </tbody>
       </table>
-      <div v-if="filtroProducto === '' && codigoDigitado === ''" class="paginacion">
+      <div v-if="filtroProducto === '' && codigoDigitado === '' && nombreDigitado === ''" class="paginacion">
         <button :disabled="paginaActual === 1" @click="cambiarPagina(paginaActual - 1)">Anterior</button>
         <span>Página {{ paginaActual }}</span>
-        <button :disabled="productos.length < limite" @click="cambiarPagina(paginaActual + 1)">Siguiente</button>
+        <button :disabled="productosFiltrados.length < limite" @click="cambiarPagina(paginaActual + 1)">Siguiente</button>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-  import apiClient from "../services/axios";
-  import * as XLSX from "xlsx";
+import apiClient from "../services/axios";
+import * as XLSX from "xlsx";
 
-  export default {
-    name: "ConsultaInventario",
-    data() {
-      return {
-        filtroProducto: "",
-        codigoDigitado: "",
-        nombreDigitado: "",
-        productosDisponibles: [],
-        productos: [],
-        productosFiltrados: [],
-        bodegas: [],
-        bodegasMostradas: [],
-        filtroBodega: "",
-        mostrarInventario: false,
-        paginaActual: 1,
-        limite: 20,
-        todosLosProductos: [],
-        umbralAlerta: 10,
-        filtroEstado: ''
-      };
+export default {
+  name: "ConsultaInventario",
+  data() {
+    return {
+      filtroProducto: "",
+      codigoDigitado: "",
+      nombreDigitado: "",
+      productosDisponibles: [],
+      productos: [],
+      productosFiltrados: [],
+      bodegas: [],
+      bodegasMostradas: [],
+      filtroBodega: "",
+      mostrarInventario: false,
+      paginaActual: 1,
+      limite: 20,
+      todosLosProductos: [],
+      umbralAlerta: 10, // Valor por defecto en porcentaje
+      filtroEstado: ''
+    };
+  },
+  methods: {
+    limpiarPagina() {
+      this.codigoDigitado = "";
+      this.nombreDigitado = "";
+      this.filtroProducto = "";
+      this.filtroBodega = "";
+      this.filtroEstado = "";
+      this.productos = [];
+      this.productosFiltrados = [];
+      this.bodegas = [];
+      this.bodegasMostradas = [];
+      this.mostrarInventario = false;
+      this.paginaActual = 1;
+      this.todosLosProductos = [];
+      this.umbralAlerta = 10; // Restaurar valor por defecto
     },
-    methods: {
-      limpiarPagina() {
-        this.codigoDigitado = "";
-        this.nombreDigitado = "";
-        this.filtroProducto = "";
-        this.filtroBodega = "";
-        this.productos = [];
-        this.productosFiltrados = [];
-        this.bodegas = [];
-        this.bodegasMostradas = [];
-        this.mostrarInventario = false;
-        this.paginaActual = 1;
-        this.todosLosProductos = [];
-      },
-      async consultar() {
-        if (this.filtroProducto || this.codigoDigitado || this.nombreDigitado) {
-          await this.consultarProductoEspecifico();
+    async consultar() {
+      if (this.filtroProducto || this.codigoDigitado || this.nombreDigitado) {
+        await this.consultarProductoEspecifico();
+      } else {
+        await this.consultarTodosLosProductos();
+      }
+      this.filtrarPorEstado(); // Aplicar filtro por estado después de consultar
+    },
+    async consultarProductoEspecifico() {
+      try {
+        const codigo = this.filtroProducto || this.codigoDigitado;
+        let url = `/api/inventario-con-costos/${codigo}`;
+        if (this.nombreDigitado && !codigo) {
+          url = `/api/inventario-con-costos?nombre=${encodeURIComponent(this.nombreDigitado)}&limit=999999`;
+        }
+        const response = await apiClient.get(url);
+        const data = response.data;
+
+        if (data.message) {
+          alert(data.message);
+          this.mostrarInventario = false;
+          this.productos = [];
+          this.bodegas = [];
+          return;
+        }
+
+        const bodegasResponse = await apiClient.get("/api/bodegas");
+        const todasLasBodegas = bodegasResponse.data.map((b) => b.nombre);
+
+        this.bodegas = todasLasBodegas;
+        this.bodegasMostradas = todasLasBodegas;
+        if (data.producto) {
+          this.productos = [{
+            codigo: data.producto.codigo,
+            nombre: data.producto.nombre,
+            cantidad_total: data.inventario.reduce((total, item) => total + item.cantidad, 0),
+            stock_minimo: data.producto.stock_minimo !== null ? Number(data.producto.stock_minimo) : null,
+            cantidades_por_bodega: todasLasBodegas.reduce((acc, bodega) => {
+              const item = data.inventario.find((i) => i.bodega === bodega);
+              acc[bodega] = item ? item.cantidad : 0;
+              return acc;
+            }, {}),
+            costos_por_bodega: todasLasBodegas.reduce((acc, bodega) => {
+              const item = data.inventario.find((i) => i.bodega === bodega);
+              acc[bodega] = item ? item.costo_total : 0;
+              return acc;
+            }, {})
+          }];
         } else {
-          await this.consultarTodosLosProductos();
-        }
-      },
-      async consultarProductoEspecifico() {
-        try {
-          const codigo = this.filtroProducto || this.codigoDigitado;
-          let url = `/api/inventario-con-costos/${codigo}`;
-          if (this.nombreDigitado && !codigo) {
-            url = `/api/inventario-con-costos?nombre=${encodeURIComponent(this.nombreDigitado)}&limit=999999`;
-          }
-          const response = await apiClient.get(url);
-          const data = response.data;
-
-          if (data.message) {
-            alert(data.message);
-            this.mostrarInventario = false;
-            this.productos = [];
-            this.bodegas = [];
-            return;
-          }
-
-          const bodegasResponse = await apiClient.get("/api/bodegas");
-          const todasLasBodegas = bodegasResponse.data.map((b) => b.nombre);
-
-          this.bodegas = todasLasBodegas;
-          this.bodegasMostradas = todasLasBodegas;
-          if (data.producto) {
-            this.productos = [{
-              codigo: data.producto.codigo,
-              nombre: data.producto.nombre,
-              cantidad_total: data.inventario.reduce((total, item) => total + item.cantidad, 0),
-              stock_minimo: data.producto.stock_minimo !== null ? Number(data.producto.stock_minimo) : null, // Incluir stock_minimo
-              cantidades_por_bodega: todasLasBodegas.reduce((acc, bodega) => {
-                const item = data.inventario.find((i) => i.bodega === bodega);
-                acc[bodega] = item ? item.cantidad : 0;
-                return acc;
-              }, {}),
-              costos_por_bodega: todasLasBodegas.reduce((acc, bodega) => {
-                const item = data.inventario.find((i) => i.bodega === bodega);
-                acc[bodega] = item ? item.costo_total : 0;
-                return acc;
-              }, {})
-            }];
-          } else {
-            this.productos = data.productos
-              .sort((a, b) => a.codigo.localeCompare(b.codigo)) // Ordenar por código
-              .map(producto => ({
-                codigo: producto.codigo,
-                nombre: producto.nombre,
-                cantidad_total: Number(producto.cantidad_total),
-                stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null, // Incluir stock_minimo
-                cantidades_por_bodega: producto.cantidades_por_bodega,
-                costos_por_bodega: producto.costos_por_bodega
-              }));
-          }
-          this.productosFiltrados = [...this.productos];
-          this.mostrarInventario = true;
-        } catch (error) {
-          console.error("Error al consultar inventario específico:", error);
-          alert("Ocurrió un error al consultar el inventario.");
-        }
-      },
-      async consultarTodosLosProductos() {
-        try {
-          const offset = (this.paginaActual - 1) * this.limite;
-          const response = await apiClient.get(`/api/inventario-con-costos?offset=${offset}&limit=${this.limite}`);
-          const { productos, bodegas } = response.data;
-
-          if (!productos || productos.length === 0) {
-            alert("No se encontró información en el inventario.");
-            this.mostrarInventario = false;
-            return;
-          }
-
-          this.bodegas = bodegas || [];
-          this.bodegasMostradas = [...this.bodegas];
-          this.productos = productos
-            .sort((a, b) => a.codigo.localeCompare(b.codigo)) // Ordenar por código
+          this.productos = data.productos
+            .sort((a, b) => a.codigo.localeCompare(b.codigo))
             .map(producto => ({
               codigo: producto.codigo,
               nombre: producto.nombre,
               cantidad_total: Number(producto.cantidad_total),
-              stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null, // Incluir stock_minimo
-              cantidades_por_bodega: { ...producto.cantidades_por_bodega },
-              costos_por_bodega: { ...producto.costos_por_bodega }
+              stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null,
+              cantidades_por_bodega: producto.cantidades_por_bodega,
+              costos_por_bodega: producto.costos_por_bodega
             }));
-          this.productosFiltrados = [...this.productos];
-          this.mostrarInventario = true;
-
-          const fullResponse = await apiClient.get("/api/inventario-con-costos?limit=999999");
-          this.todosLosProductos = fullResponse.data.productos
-            .sort((a, b) => a.codigo.localeCompare(b.codigo)) // Ordenar por código
-            .map(producto => ({
-              codigo: producto.codigo,
-              nombre: producto.nombre,
-              cantidad_total: Number(producto.cantidad_total),
-              stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null, // Incluir stock_minimo
-              cantidades_por_bodega: { ...producto.cantidades_por_bodega },
-              costos_por_bodega: { ...producto.costos_por_bodega }
-            }));
-        } catch (error) {
-          console.error("Error al consultar inventario general:", error);
-          alert("Ocurrió un error al consultar el inventario general.");
         }
-      },
-      filtrarPorBodega() {
-        if (this.filtroBodega) {
-          this.bodegasMostradas = [this.filtroBodega];
-          this.productosFiltrados = this.productos.map(producto => ({
-            ...producto,
-            cantidad_total: producto.cantidades_por_bodega[this.filtroBodega] || 0,
+        this.productosFiltrados = [...this.productos];
+        this.mostrarInventario = true;
+      } catch (error) {
+        console.error("Error al consultar inventario específico:", error);
+        alert("Ocurrió un error al consultar el inventario.");
+      }
+    },
+    async consultarTodosLosProductos() {
+      try {
+        const offset = (this.paginaActual - 1) * this.limite;
+        const response = await apiClient.get(`/api/inventario-con-costos?offset=${offset}&limit=${this.limite}`);
+        const { productos, bodegas } = response.data;
+
+        if (!productos || productos.length === 0) {
+          alert("No se encontró información en el inventario.");
+          this.mostrarInventario = false;
+          return;
+        }
+
+        this.bodegas = bodegas || [];
+        this.bodegasMostradas = [...this.bodegas];
+        this.productos = productos
+          .sort((a, b) => a.codigo.localeCompare(b.codigo))
+          .map(producto => ({
+            codigo: producto.codigo,
+            nombre: producto.nombre,
+            cantidad_total: Number(producto.cantidad_total),
+            stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null,
+            cantidades_por_bodega: { ...producto.cantidades_por_bodega },
+            costos_por_bodega: { ...producto.costos_por_bodega }
           }));
-        } else {
-          this.bodegasMostradas = [...this.bodegas];
-          this.productosFiltrados = [...this.productos];
-        }
-      },
-      filtrarPorEstado() {
-        if (!this.filtroEstado) {
-          this.productosFiltrados = [...this.productos];
-        } else {
-          this.productosFiltrados = this.productos.filter(producto => {
-            if (producto.stock_minimo === null || producto.stock_minimo === undefined) {
-              return false; // No incluir productos sin stock_minimo en filtros específicos
-            }
-            const diff = Number(producto.cantidad_total) - Number(producto.stock_minimo);
-            if (this.filtroEstado === 'verde') return diff > Number(this.umbralAlerta);
-            if (this.filtroEstado === 'amarillo') return diff <= Number(this.umbralAlerta) && diff > 0;
-            if (this.filtroEstado === 'rojo') return diff <= 0;
-          });
-        }
-      },
-      async cargarProductosDisponibles() {
-        try {
-          const response = await apiClient.get("/api/productos/completos");
-          this.productosDisponibles = response.data.sort((a, b) => a.codigo.localeCompare(b.codigo));
-        } catch (error) {
-          console.error("[ERROR] Al cargar productos disponibles:", error);
-        }
-      },
-      cambiarPagina(nuevaPagina) {
-        this.paginaActual = nuevaPagina;
-        this.consultarTodosLosProductos();
-      },
-      sincronizarPorNombre() {
-        const productoEncontrado = this.productosDisponibles.find(p => 
-          p.nombre.toLowerCase().includes(this.nombreDigitado.toLowerCase())
-        );
-        if (productoEncontrado) {
-          this.filtroProducto = productoEncontrado.codigo;
-          this.codigoDigitado = productoEncontrado.codigo;
-        }
-      },
-      sincronizarCodigoConSelector() {
-        const productoEncontrado = this.productosDisponibles.find(p => p.codigo === this.codigoDigitado);
-        if (productoEncontrado) {
-          this.filtroProducto = productoEncontrado.codigo;
-          this.nombreDigitado = productoEncontrado.nombre;
-        }
-      },
-      sincronizarSelectorConCodigo() {
-        const productoSeleccionado = this.productosDisponibles.find(p => p.codigo === this.filtroProducto);
-        if (productoSeleccionado) {
-          this.codigoDigitado = productoSeleccionado.codigo;
-          this.nombreDigitado = productoSeleccionado.nombre;
-        }
-      },
-      volverAlMenu() {
-        const tipoUsuario = localStorage.getItem("tipo_usuario");
-        if (tipoUsuario === "admin") {
-          this.$router.push('/menu');
-        } else if (tipoUsuario === "gerente") {
-          this.$router.push('/menu-gerente');
-        } else {
-          alert("Rol no reconocido. Contacta al administrador.");
-        }
-      },
-      formatCosto(costo) {
-        return Number(costo).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      },
-      calcularCostoTotalBodega(bodega) {
-        return this.productosFiltrados.reduce((total, producto) => {
-          return total + (producto.costos_por_bodega[bodega] || 0);
-        }, 0);
-      },
-      calcularCostoTotalInventario() {
-        return this.bodegasMostradas.reduce((total, bodega) => {
-          return total + this.calcularCostoTotalBodega(bodega);
-        }, 0);
-      },
-      exportarAExcel() {
-        const dataToExport = this.filtroProducto || this.codigoDigitado || this.nombreDigitado 
-          ? this.productosFiltrados 
-          : this.todosLosProductos;
+        this.productosFiltrados = [...this.productos];
+        this.mostrarInventario = true;
 
-        let worksheetData = [];
-
-        if (!this.filtroProducto && !this.codigoDigitado && !this.nombreDigitado) {
-          // Consulta general: incluir tabla resumen
-          worksheetData = [
-            ["Resumen de Costos por Almacén"],
-            ["Almacén", "Costo Total"],
-            ...this.bodegasMostradas.map(bodega => [
-              bodega,
-              this.calcularCostoTotalBodega(bodega),
-            ]),
-            ["TOTAL", this.calcularCostoTotalInventario()],
-            [""], // Línea en blanco para separar
-          ];
-        }
-
-        // Función para determinar el estado
-        const getEstado = (producto) => {
+        const fullResponse = await apiClient.get("/api/inventario-con-costos?limit=999999");
+        this.todosLosProductos = fullResponse.data.productos
+          .sort((a, b) => a.codigo.localeCompare(b.codigo))
+          .map(producto => ({
+            codigo: producto.codigo,
+            nombre: producto.nombre,
+            cantidad_total: Number(producto.cantidad_total),
+            stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null,
+            cantidades_por_bodega: { ...producto.cantidades_por_bodega },
+            costos_por_bodega: { ...producto.costos_por_bodega }
+          }));
+      } catch (error) {
+        console.error("Error al consultar inventario general:", error);
+        alert("Ocurrió un error al consultar el inventario general.");
+      }
+    },
+    filtrarPorBodega() {
+      if (this.filtroBodega) {
+        this.bodegasMostradas = [this.filtroBodega];
+        this.productosFiltrados = this.productos.map(producto => ({
+          ...producto,
+          cantidad_total: producto.cantidades_por_bodega[this.filtroBodega] || 0,
+        }));
+      } else {
+        this.bodegasMostradas = [...this.bodegas];
+        this.productosFiltrados = [...this.productos];
+      }
+    },
+    filtrarPorEstado() {
+      if (!this.filtroEstado) {
+        this.productosFiltrados = [...this.productos];
+      } else {
+        this.productosFiltrados = this.todosLosProductos.filter(producto => {
           if (producto.stock_minimo === null || producto.stock_minimo === undefined) {
-            return "-";
+            return false;
           }
-          const cantidadTotal = Number(producto.cantidad_total);
-          const stockMinimo = Number(producto.stock_minimo);
-          const umbral = Number(this.umbralAlerta);
-          if (cantidadTotal > stockMinimo + umbral) {
-            return "✔";
-          } else if (cantidadTotal > stockMinimo) {
-            return "⚠";
-          } else {
-            return "✖";
-          }
-        };
-
-        // Agregar tabla de inventario detallada con columna "Estado"
-        worksheetData.push(
-          ["Inventario de Productos"],
-          ["Código", "Nombre", "Total", "Estado", ...this.bodegasMostradas.flatMap(bodega => [bodega, `Costo Total ${bodega}`])],
-          ...dataToExport.map(producto => [
-            producto.codigo,
-            producto.nombre,
-            producto.cantidad_total,
-            getEstado(producto), // Incluir el estado
-            ...this.bodegasMostradas.flatMap(bodega => [
-              producto.cantidades_por_bodega[bodega] || 0,
-              producto.costos_por_bodega[bodega] || 0,
-            ]),
-          ])
-        );
-
-        const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario");
-        XLSX.writeFile(workbook, `inventario_${new Date().toISOString().slice(0,10)}.xlsx`);
-      },
-
+          const umbral = Math.ceil(Number(producto.stock_minimo) * (Number(this.umbralAlerta) / 100));
+          const diff = Number(producto.cantidad_total) - Number(producto.stock_minimo);
+          if (this.filtroEstado === 'verde') return diff > umbral;
+          if (this.filtroEstado === 'amarillo') return diff <= umbral && diff > 0;
+          if (this.filtroEstado === 'rojo') return diff <= 0;
+        });
+        // Aplicar paginación después de filtrar
+        const start = (this.paginaActual - 1) * this.limite;
+        this.productosFiltrados = this.productosFiltrados.slice(start, start + this.limite);
+      }
     },
-    mounted() {
-      this.cargarProductosDisponibles();
+    async cargarProductosDisponibles() {
+      try {
+        const response = await apiClient.get("/api/productos/completos");
+        this.productosDisponibles = response.data.sort((a, b) => a.codigo.localeCompare(b.codigo));
+      } catch (error) {
+        console.error("[ERROR] Al cargar productos disponibles:", error);
+      }
     },
-  };
+    cambiarPagina(nuevaPagina) {
+      this.paginaActual = nuevaPagina;
+      this.consultarTodosLosProductos();
+    },
+    sincronizarPorNombre() {
+      const productoEncontrado = this.productosDisponibles.find(p => 
+        p.nombre.toLowerCase().includes(this.nombreDigitado.toLowerCase())
+      );
+      if (productoEncontrado) {
+        this.filtroProducto = productoEncontrado.codigo;
+        this.codigoDigitado = productoEncontrado.codigo;
+      }
+    },
+    sincronizarCodigoConSelector() {
+      const productoEncontrado = this.productosDisponibles.find(p => p.codigo === this.codigoDigitado);
+      if (productoEncontrado) {
+        this.filtroProducto = productoEncontrado.codigo;
+        this.nombreDigitado = productoEncontrado.nombre;
+      }
+    },
+    sincronizarSelectorConCodigo() {
+      const productoSeleccionado = this.productosDisponibles.find(p => p.codigo === this.filtroProducto);
+      if (productoSeleccionado) {
+        this.codigoDigitado = productoSeleccionado.codigo;
+        this.nombreDigitado = productoSeleccionado.nombre;
+      }
+    },
+    volverAlMenu() {
+      const tipoUsuario = localStorage.getItem("tipo_usuario");
+      if (tipoUsuario === "admin") {
+        this.$router.push('/menu');
+      } else if (tipoUsuario === "gerente") {
+        this.$router.push('/menu-gerente');
+      } else {
+        alert("Rol no reconocido. Contacta al administrador.");
+      }
+    },
+    formatCosto(costo) {
+      return Number(costo).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    },
+    calcularCostoTotalBodega(bodega) {
+      return this.productosFiltrados.reduce((total, producto) => {
+        return total + (producto.costos_por_bodega[bodega] || 0);
+      }, 0);
+    },
+    calcularCostoTotalInventario() {
+      return this.bodegasMostradas.reduce((total, bodega) => {
+        return total + this.calcularCostoTotalBodega(bodega);
+      }, 0);
+    },
+    exportarAExcel() {
+      const dataToExport = this.filtroProducto || this.codigoDigitado || this.nombreDigitado 
+        ? this.productosFiltrados 
+        : this.todosLosProductos;
+
+      let worksheetData = [];
+
+      if (!this.filtroProducto && !this.codigoDigitado && !this.nombreDigitado) {
+        worksheetData = [
+          ["Resumen de Costos por Almacén"],
+          ["Almacén", "Costo Total"],
+          ...this.bodegasMostradas.map(bodega => [
+            bodega,
+            this.calcularCostoTotalBodega(bodega),
+          ]),
+          ["TOTAL", this.calcularCostoTotalInventario()],
+          [""],
+        ];
+      }
+
+      const getEstado = (producto) => {
+        if (producto.stock_minimo === null || producto.stock_minimo === undefined) {
+          return "-";
+        }
+        const cantidadTotal = Number(producto.cantidad_total);
+        const stockMinimo = Number(producto.stock_minimo);
+        const umbral = Math.ceil(stockMinimo * (Number(this.umbralAlerta) / 100));
+        if (cantidadTotal > stockMinimo + umbral) {
+          return "✔";
+        } else if (cantidadTotal > stockMinimo) {
+          return "⚠";
+        } else {
+          return "✖";
+        }
+      };
+
+      worksheetData.push(
+        ["Inventario de Productos"],
+        ["Código", "Nombre", "Stock Mínimo", "Total", "Estado", ...this.bodegasMostradas.flatMap(bodega => [bodega, `Costo Total ${bodega}`])],
+        ...dataToExport.map(producto => [
+          producto.codigo,
+          producto.nombre,
+          producto.stock_minimo !== null ? producto.stock_minimo : "-",
+          producto.cantidad_total,
+          getEstado(producto),
+          ...this.bodegasMostradas.flatMap(bodega => [
+            producto.cantidades_por_bodega[bodega] || 0,
+            producto.costos_por_bodega[bodega] || 0,
+          ]),
+        ])
+      );
+
+      const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario");
+      XLSX.writeFile(workbook, `inventario_${new Date().toISOString().slice(0,10)}.xlsx`);
+    },
+  },
+  mounted() {
+    this.cargarProductosDisponibles();
+  },
+};
 </script>
 
 
