@@ -27,6 +27,7 @@ class Producto(db.Model):
     codigo_barras = db.Column(db.String(50))
     es_producto_compuesto = db.Column(db.Boolean, default=False)
     peso_unitario_calculado = db.Column(db.Numeric)
+    stock_minimo = db.Column(db.Integer, nullable=True)  # Nuevo campo agregado
 
     # Relación con materiales_producto como producto compuesto
     materiales_compuestos = db.relationship(
@@ -46,6 +47,7 @@ class Producto(db.Model):
 
     def __repr__(self):
         return f"<Producto(id={self.id}, nombre='{self.nombre}', codigo='{self.codigo}')>"
+
 
 # Modelo MaterialProducto
 class MaterialProducto(db.Model):

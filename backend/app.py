@@ -605,7 +605,8 @@ def create_app():
                 peso_total_gr=data['peso_total_gr'],
                 peso_unidad_gr=data['peso_unidad_gr'],
                 codigo_barras=data['codigo_barras'],
-                es_producto_compuesto=data['es_producto_compuesto']
+                es_producto_compuesto=data['es_producto_compuesto'],
+                stock_minimo=data.get('stock_minimo', None)  # Nuevo campo opcional
             )
             db.session.add(nuevo_producto)
             db.session.commit()
@@ -646,7 +647,8 @@ def create_app():
                 'peso_total_gr': float(p.peso_total_gr) if p.peso_total_gr is not None else None,
                 'peso_unidad_gr': float(p.peso_unidad_gr) if p.peso_unidad_gr is not None else None,
                 'codigo_barras': p.codigo_barras,
-                'es_producto_compuesto': p.es_producto_compuesto
+                'es_producto_compuesto': p.es_producto_compuesto,
+                'stock_minimo': p.stock_minimo  # Nuevo campo en la respuesta
             } for p in productos],
             'total': total
         }), 200
@@ -677,7 +679,8 @@ def create_app():
                     es_producto_compuesto=True,
                     peso_total_gr=0,  # Se recalculará al agregar materiales
                     peso_unidad_gr=0,  # Se recalculará al agregar materiales
-                    codigo_barras=data.get('codigo_barras', None)
+                    codigo_barras=data.get('codigo_barras', None),
+                    stock_minimo=data.get('stock_minimo', None)  # Nuevo campo opcional
                 )
             else:
                 nuevo_producto = Producto(
@@ -686,7 +689,8 @@ def create_app():
                     es_producto_compuesto=False,
                     peso_total_gr=data['peso_total_gr'],
                     peso_unidad_gr=data['peso_unidad_gr'],
-                    codigo_barras=data.get('codigo_barras', None)
+                    codigo_barras=data.get('codigo_barras', None),
+                    stock_minimo=data.get('stock_minimo', None)  # Nuevo campo opcional
                 )
 
             db.session.add(nuevo_producto)
@@ -725,7 +729,8 @@ def create_app():
                     'peso_total_gr': p.peso_total_gr,
                     'peso_unidad_gr': p.peso_unidad_gr,
                     'codigo_barras': p.codigo_barras,
-                    'es_producto_compuesto': p.es_producto_compuesto
+                    'es_producto_compuesto': p.es_producto_compuesto,
+                    'stock_minimo': p.stock_minimo  # Nuevo campo en la respuesta
                 } for p in productos],
                 'total': total
             })
@@ -807,6 +812,9 @@ def create_app():
                 nombre = row['nombre'].strip()
                 es_producto_compuesto = row['es_producto_compuesto'].strip().lower() == "si"
                 cantidad_productos = int(row['cantidad_productos']) if row['cantidad_productos'] else 0
+                # Nuevo campo stock_minimo (opcional)
+                stock_minimo = row.get('stock_minimo', '').strip()
+                stock_minimo = float(stock_minimo) if stock_minimo else None  # Convertir a float o dejar como None
 
                 # 🛑 Validar que el producto no exista ya en la BD
                 if Producto.query.filter((Producto.codigo == codigo) | (Producto.nombre == nombre)).first():
@@ -855,7 +863,8 @@ def create_app():
                         peso_total_gr=0,  # Se calculará después
                         peso_unidad_gr=0,  # Se calculará después
                         codigo_barras=row.get('codigo_barras', None),
-                        es_producto_compuesto=True
+                        es_producto_compuesto=True,
+                        stock_minimo=stock_minimo  # Nuevo campo opcional
                     )
                     db.session.add(producto)
                     db.session.commit()
@@ -883,14 +892,15 @@ def create_app():
                         errores.append(f"⚠️ ERROR en código {codigo}: Debe incluir 'peso_total_gr' y 'peso_unidad_gr' para productos a granel.")
                         continue
 
-                    # ✅ Crear el producto a granel
+                    # ✅ Crear el producto base
                     producto = Producto(
                         codigo=codigo,
                         nombre=nombre,
                         peso_total_gr=float(row['peso_total_gr']),
                         peso_unidad_gr=float(row['peso_unidad_gr']),
                         codigo_barras=row.get('codigo_barras', None),
-                        es_producto_compuesto=False
+                        es_producto_compuesto=False,
+                        stock_minimo=stock_minimo  # Nuevo campo opcional
                     )
                     db.session.add(producto)
                     productos_creados.append(codigo)
@@ -930,6 +940,7 @@ def create_app():
             producto.peso_unidad_gr = data.get('peso_unidad_gr', producto.peso_unidad_gr)
             producto.codigo_barras = data.get('codigo_barras', producto.codigo_barras)
             producto.es_producto_compuesto = data.get('es_producto_compuesto', producto.es_producto_compuesto)
+            producto.stock_minimo = data.get('stock_minimo', producto.stock_minimo)  # Nuevo campo
 
             # Guardar los cambios en la base de datos
             db.session.commit()
@@ -1608,6 +1619,7 @@ def create_app():
                 'producto': {
                     'codigo': producto.codigo,
                     'nombre': producto.nombre,
+                    'stock_minimo': producto.stock_minimo  # Nuevo campo en la respuesta
                 },
                 'inventario': inventario_con_costos
             })
@@ -2305,6 +2317,7 @@ def create_app():
                     'cantidad_total': total_cantidad,
                     'cantidades_por_bodega': cantidades_por_bodega,
                     'costos_por_bodega': costos_por_bodega,
+                    'stock_minimo': producto.stock_minimo  # Nuevo campo en la respuesta
                 })
 
             return jsonify({
@@ -4712,6 +4725,7 @@ def create_app():
             pdf.line(50, y, 742, y)
 
             # Mostrar "Cierre Forzado" o "Orden Finalizada sin Novedad"
+            # Mostrar "Cierre Forzado" o "Orden Finalizada sin Novedad" con título en negrita
             y -= 15
             pdf.setFont("Helvetica-Bold", 10)
             if tiene_cierre_forzado:

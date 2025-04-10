@@ -39,6 +39,7 @@
           </option>
         </select>
       </div>
+      
       <div>
         <button @click="consultar">Consultar Inventario</button>
       </div>
@@ -52,6 +53,19 @@
         <option v-for="bodega in bodegas" :key="bodega" :value="bodega">{{ bodega }}</option>
       </select>
     </div>
+    <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === ''">
+          <label for="umbralAlerta">Umbral de Alerta (unidades):</label>
+          <input v-model.number="umbralAlerta" id="umbralAlerta" type="number" min="0" value="10" />
+      </div>
+      <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === ''">
+          <label for="filtroEstado">Filtrar por Estado:</label>
+          <select v-model="filtroEstado" id="filtroEstado" @change="filtrarPorEstado">
+              <option value="">Todos</option>
+              <option value="verde">Verde (OK)</option>
+              <option value="amarillo">Amarillo (Advertencia)</option>
+              <option value="rojo">Rojo (Crítico)</option>
+          </select>
+      </div>
 
     <!-- Tabla Resumen de Costos (solo para consulta general) -->
     <div v-if="mostrarInventario && filtroProducto === '' && codigoDigitado === '' && nombreDigitado === ''">
@@ -86,6 +100,7 @@
             <th>Código</th>
             <th>Nombre</th>
             <th>Total</th>
+            <th>Estado</th>
             <template v-for="bodega in bodegasMostradas" :key="bodega">
               <th>{{ bodega }}</th>
               <th>Costo Total {{ bodega }}</th>
@@ -97,6 +112,14 @@
             <td>{{ producto.codigo }}</td>
             <td>{{ producto.nombre }}</td>
             <td>{{ producto.cantidad_total }}</td>
+            <td>
+              <span v-if="producto.stock_minimo !== null && producto.stock_minimo !== undefined">
+                <span v-if="Number(producto.cantidad_total) > Number(producto.stock_minimo) + Number(umbralAlerta)" class="estado verde">✔</span>
+                <span v-else-if="Number(producto.cantidad_total) > Number(producto.stock_minimo)" class="estado amarillo">⚠</span>
+                <span v-else class="estado rojo">✖</span>
+              </span>
+              <span v-else>-</span>
+            </td>
             <template v-for="bodega in bodegasMostradas" :key="bodega">
               <td>{{ producto.cantidades_por_bodega[bodega] || 0 }}</td>
               <td>${{ formatCosto(producto.costos_por_bodega[bodega] || 0) }}</td>
@@ -134,6 +157,8 @@
         paginaActual: 1,
         limite: 20,
         todosLosProductos: [],
+        umbralAlerta: 10,
+        filtroEstado: ''
       };
     },
     methods: {
@@ -185,6 +210,7 @@
               codigo: data.producto.codigo,
               nombre: data.producto.nombre,
               cantidad_total: data.inventario.reduce((total, item) => total + item.cantidad, 0),
+              stock_minimo: data.producto.stock_minimo !== null ? Number(data.producto.stock_minimo) : null, // Incluir stock_minimo
               cantidades_por_bodega: todasLasBodegas.reduce((acc, bodega) => {
                 const item = data.inventario.find((i) => i.bodega === bodega);
                 acc[bodega] = item ? item.cantidad : 0;
@@ -194,16 +220,19 @@
                 const item = data.inventario.find((i) => i.bodega === bodega);
                 acc[bodega] = item ? item.costo_total : 0;
                 return acc;
-              }, {}),
+              }, {})
             }];
           } else {
-            this.productos = data.productos.map(producto => ({
-              codigo: producto.codigo,
-              nombre: producto.nombre,
-              cantidad_total: producto.cantidad_total,
-              cantidades_por_bodega: producto.cantidades_por_bodega,
-              costos_por_bodega: producto.costos_por_bodega,
-            }));
+            this.productos = data.productos
+              .sort((a, b) => a.codigo.localeCompare(b.codigo)) // Ordenar por código
+              .map(producto => ({
+                codigo: producto.codigo,
+                nombre: producto.nombre,
+                cantidad_total: Number(producto.cantidad_total),
+                stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null, // Incluir stock_minimo
+                cantidades_por_bodega: producto.cantidades_por_bodega,
+                costos_por_bodega: producto.costos_por_bodega
+              }));
           }
           this.productosFiltrados = [...this.productos];
           this.mostrarInventario = true;
@@ -226,24 +255,30 @@
 
           this.bodegas = bodegas || [];
           this.bodegasMostradas = [...this.bodegas];
-          this.productos = productos.map((producto) => ({
-            codigo: producto.codigo,
-            nombre: producto.nombre,
-            cantidad_total: producto.cantidad_total,
-            cantidades_por_bodega: { ...producto.cantidades_por_bodega },
-            costos_por_bodega: { ...producto.costos_por_bodega },
-          }));
+          this.productos = productos
+            .sort((a, b) => a.codigo.localeCompare(b.codigo)) // Ordenar por código
+            .map(producto => ({
+              codigo: producto.codigo,
+              nombre: producto.nombre,
+              cantidad_total: Number(producto.cantidad_total),
+              stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null, // Incluir stock_minimo
+              cantidades_por_bodega: { ...producto.cantidades_por_bodega },
+              costos_por_bodega: { ...producto.costos_por_bodega }
+            }));
           this.productosFiltrados = [...this.productos];
           this.mostrarInventario = true;
 
           const fullResponse = await apiClient.get("/api/inventario-con-costos?limit=999999");
-          this.todosLosProductos = fullResponse.data.productos.map((producto) => ({
-            codigo: producto.codigo,
-            nombre: producto.nombre,
-            cantidad_total: producto.cantidad_total,
-            cantidades_por_bodega: { ...producto.cantidades_por_bodega },
-            costos_por_bodega: { ...producto.costos_por_bodega },
-          }));
+          this.todosLosProductos = fullResponse.data.productos
+            .sort((a, b) => a.codigo.localeCompare(b.codigo)) // Ordenar por código
+            .map(producto => ({
+              codigo: producto.codigo,
+              nombre: producto.nombre,
+              cantidad_total: Number(producto.cantidad_total),
+              stock_minimo: producto.stock_minimo !== null ? Number(producto.stock_minimo) : null, // Incluir stock_minimo
+              cantidades_por_bodega: { ...producto.cantidades_por_bodega },
+              costos_por_bodega: { ...producto.costos_por_bodega }
+            }));
         } catch (error) {
           console.error("Error al consultar inventario general:", error);
           alert("Ocurrió un error al consultar el inventario general.");
@@ -259,6 +294,21 @@
         } else {
           this.bodegasMostradas = [...this.bodegas];
           this.productosFiltrados = [...this.productos];
+        }
+      },
+      filtrarPorEstado() {
+        if (!this.filtroEstado) {
+          this.productosFiltrados = [...this.productos];
+        } else {
+          this.productosFiltrados = this.productos.filter(producto => {
+            if (producto.stock_minimo === null || producto.stock_minimo === undefined) {
+              return false; // No incluir productos sin stock_minimo en filtros específicos
+            }
+            const diff = Number(producto.cantidad_total) - Number(producto.stock_minimo);
+            if (this.filtroEstado === 'verde') return diff > Number(this.umbralAlerta);
+            if (this.filtroEstado === 'amarillo') return diff <= Number(this.umbralAlerta) && diff > 0;
+            if (this.filtroEstado === 'rojo') return diff <= 0;
+          });
         }
       },
       async cargarProductosDisponibles() {
@@ -340,14 +390,32 @@
           ];
         }
 
-        // Agregar tabla de inventario detallada
+        // Función para determinar el estado
+        const getEstado = (producto) => {
+          if (producto.stock_minimo === null || producto.stock_minimo === undefined) {
+            return "-";
+          }
+          const cantidadTotal = Number(producto.cantidad_total);
+          const stockMinimo = Number(producto.stock_minimo);
+          const umbral = Number(this.umbralAlerta);
+          if (cantidadTotal > stockMinimo + umbral) {
+            return "✔";
+          } else if (cantidadTotal > stockMinimo) {
+            return "⚠";
+          } else {
+            return "✖";
+          }
+        };
+
+        // Agregar tabla de inventario detallada con columna "Estado"
         worksheetData.push(
           ["Inventario de Productos"],
-          ["Código", "Nombre", "Total", ...this.bodegasMostradas.flatMap(bodega => [bodega, `Costo Total ${bodega}`])],
+          ["Código", "Nombre", "Total", "Estado", ...this.bodegasMostradas.flatMap(bodega => [bodega, `Costo Total ${bodega}`])],
           ...dataToExport.map(producto => [
             producto.codigo,
             producto.nombre,
             producto.cantidad_total,
+            getEstado(producto), // Incluir el estado
             ...this.bodegasMostradas.flatMap(bodega => [
               producto.cantidades_por_bodega[bodega] || 0,
               producto.costos_por_bodega[bodega] || 0,
@@ -360,6 +428,7 @@
         XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario");
         XLSX.writeFile(workbook, `inventario_${new Date().toISOString().slice(0,10)}.xlsx`);
       },
+
     },
     mounted() {
       this.cargarProductosDisponibles();
@@ -484,6 +553,12 @@
     font-weight: bold;
     background-color: #e9ecef;
   }
+
+  /* Estado de productos */
+  .estado.verde { color: green; font-size: 18px; }
+  .estado.amarillo { color: rgba(255, 145, 0, 0.904); font-size: 18px; }
+  .estado.rojo { color: red; font-size: 18px; }
+
 
   /* Paginación */
   .paginacion {
