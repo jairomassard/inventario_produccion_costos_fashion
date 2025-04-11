@@ -812,7 +812,6 @@ def create_app():
                 nombre = row['nombre'].strip()
                 es_producto_compuesto = row['es_producto_compuesto'].strip().lower() == "si"
                 cantidad_productos = int(row['cantidad_productos']) if row['cantidad_productos'] else 0
-                # Nuevo campo stock_minimo (opcional)
                 stock_minimo = row.get('stock_minimo', '').strip()
                 stock_minimo = float(stock_minimo) if stock_minimo else None  # Convertir a float o dejar como None
 
@@ -836,11 +835,18 @@ def create_app():
                         errores.append(f"⚠️ ERROR en código {codigo}: Debe incluir al menos un producto base.")
                         continue
 
-                    # ✅ Validar que los productos base existan
+                    # ✅ Validar que los productos base existan y aceptar cantidades decimales
                     materiales = []
                     for i in range(1, cantidad_productos + 1):
                         codigo_base = row.get(f'codigo{i}', '').strip()
-                        cantidad_base = int(row.get(f'cantidad{i}', 0))
+                        cantidad_base_str = row.get(f'cantidad{i}', '0').strip()
+                        
+                        # Convertir cantidad_base a float, permitiendo decimales
+                        try:
+                            cantidad_base = float(cantidad_base_str) if cantidad_base_str else 0.0
+                        except ValueError:
+                            errores.append(f"⚠️ ERROR en código {codigo}: La cantidad en 'cantidad{i}' ('{cantidad_base_str}') no es un número válido.")
+                            continue
 
                         if not codigo_base or cantidad_base <= 0:
                             errores.append(f"⚠️ ERROR en código {codigo}: La información en 'codigo{i}' o 'cantidad{i}' es inválida.")
@@ -864,17 +870,17 @@ def create_app():
                         peso_unidad_gr=0,  # Se calculará después
                         codigo_barras=row.get('codigo_barras', None),
                         es_producto_compuesto=True,
-                        stock_minimo=stock_minimo  # Nuevo campo opcional
+                        stock_minimo=stock_minimo
                     )
                     db.session.add(producto)
                     db.session.commit()
 
-                    # ✅ Agregar los materiales
+                    # ✅ Agregar los materiales con cantidades decimales
                     for material in materiales:
                         nuevo_material = MaterialProducto(
                             producto_compuesto_id=producto.id,
                             producto_base_id=material[0],
-                            cantidad=material[1],
+                            cantidad=material[1],  # Ahora es float
                             peso_unitario=material[2]
                         )
                         db.session.add(nuevo_material)
@@ -900,25 +906,24 @@ def create_app():
                         peso_unidad_gr=float(row['peso_unidad_gr']),
                         codigo_barras=row.get('codigo_barras', None),
                         es_producto_compuesto=False,
-                        stock_minimo=stock_minimo  # Nuevo campo opcional
+                        stock_minimo=stock_minimo
                     )
                     db.session.add(producto)
                     productos_creados.append(codigo)
 
-            db.session.commit()
+                db.session.commit()
 
             return jsonify({
                 'message': '✅ Carga de productos completada.',
                 'productos_creados': productos_creados,
                 'productos_duplicados': productos_duplicados,
-                'errores': errores  # 🛑 Enviamos los errores detallados al frontend
+                'errores': errores
             }), 201
 
         except Exception as e:
             db.session.rollback()
             print(f"Error al cargar productos desde CSV: {str(e)}")
             return jsonify({'error': 'Ocurrió un error al cargar productos desde CSV'}), 500
-
 
     
     @app.route('/api/productos/<int:producto_id>', methods=['PUT'])
