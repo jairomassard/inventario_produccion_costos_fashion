@@ -406,51 +406,50 @@ export default {
       this.archivoCsv = event.target.files[0];
       },
       async procesarCsv() {
-          const formData = new FormData();
-          formData.append('file', this.archivoCsv);
+            if (!this.archivoCsv) {
+                alert("Por favor, selecciona un archivo CSV.");
+                return;
+            }
+            this.isLoading = true; // Mostrar spinner
+            try {
+                const formData = new FormData();
+                formData.append('file', this.archivoCsv);
+                const response = await apiClient.post('/api/productos/csv', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' },
+                    timeout: 60000 // 60 segundos
+                });
 
-          try {
-              const response = await apiClient.post('/api/productos/csv', formData, {
-                  headers: { 'Content-Type': 'multipart/form-data' },
-                  timeout: 60000 // 60 segundos
-              });
+                // Extraer datos de la respuesta
+                const { message, productos_creados, productos_duplicados, errores } = response.data;
 
-              // Extraer datos de la respuesta
-              const { message, productos_creados, productos_duplicados, errores } = response.data;
+                // Construir el mensaje de éxito y errores
+                let mensaje = `✅ ${message}\n\n`;
+                if (productos_creados.length) {
+                    mensaje += `✔ Productos creados: ${productos_creados.join(', ')}\n`;
+                }
+                if (productos_duplicados.length) {
+                    mensaje += `⚠️ Productos duplicados (ya existen en la BD): ${productos_duplicados.join(', ')}\n`;
+                }
+                if (errores.length) {
+                    mensaje += `🛑 Errores detectados:\n- ${errores.join('\n- ')}\n\n`;
+                }
+                alert(mensaje);
 
-              // Construir el mensaje de éxito y errores
-              let mensaje = `✅ ${message}\n\n`;
+                // Guardar errores en una variable para mostrarlos en pantalla
+                if (errores.length || productos_duplicados.length) {
+                    this.erroresCsv = `⚠️ Reporte de errores:\n\n`;
+                    if (productos_duplicados.length) {
+                        this.erroresCsv += `🔹 Productos duplicados:\n- ${productos_duplicados.join('\n- ')}\n\n`;
+                    }
+                    if (errores.length) {
+                        this.erroresCsv += `🛑 Errores:\n- ${errores.join('\n- ')}\n`;
+                    }
+                } else {
+                    this.erroresCsv = ''; // Limpiar si no hay errores
+                }
 
-              if (productos_creados.length) {
-                  mensaje += `✔ Productos creados: ${productos_creados.join(', ')}\n`;
-              }
-
-              if (productos_duplicados.length) {
-                  mensaje += `⚠️ Productos duplicados (ya existen en la BD): ${productos_duplicados.join(', ')}\n`;
-              }
-
-              if (errores.length) {
-                  mensaje += `🛑 Errores detectados:\n- ${errores.join('\n- ')}\n\n`;
-              }
-
-              alert(mensaje);
-
-              // Guardar errores en una variable para mostrarlos en pantalla
-              if (errores.length || productos_duplicados.length) {
-                  this.erroresCsv = `⚠️ Reporte de errores:\n\n`;
-                  if (productos_duplicados.length) {
-                      this.erroresCsv += `🔹 Productos duplicados:\n- ${productos_duplicados.join('\n- ')}\n\n`;
-                  }
-                  if (errores.length) {
-                      this.erroresCsv += `🛑 Errores:\n- ${errores.join('\n- ')}\n`;
-                  }
-              } else {
-                  this.erroresCsv = ''; // Limpiar si no hay errores
-              }
-
-              // Volver a consultar los productos para reflejar los cambios
-              this.consultarProductos();
-
+                // Volver a consultar los productos para reflejar los cambios
+                this.consultarProductos();
             } catch (error) {
                 console.error('Error al cargar archivo CSV:', error);
                 let mensajeError = "❌ Error al cargar el archivo CSV.";
@@ -460,14 +459,6 @@ export default {
                     mensajeError += ` Detalles: ${error.response.data.error || 'Error desconocido'}`;
                 }
                 alert(mensajeError);
-            }
-      },
-      async procesarCsv() {
-            this.isLoading = true; // Mostrar spinner
-            try {
-                // Código existente
-            } catch (error) {
-                // Código existente
             } finally {
                 this.isLoading = false; // Ocultar spinner
             }
