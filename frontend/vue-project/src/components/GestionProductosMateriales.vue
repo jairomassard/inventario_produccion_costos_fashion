@@ -11,6 +11,12 @@
     <section class="carga-csv">
       <h2>Cargar Productos desde archivo .CSV</h2>
 
+      <!-- Indicador de carga -->
+        <div v-if="isLoading" class="spinner-container">
+            <div class="spinner"></div>
+            <p>Procesando archivo CSV, por favor espera...</p>
+        </div>
+
       <!-- Input para subir archivo -->
       <div class="carga-input">
           <input type="file" @change="cargarCsv" ref="inputCsv" />
@@ -259,6 +265,7 @@ export default {
       archivoCsv: null,
       erroresCsv: '',
       mostrarModal: false,
+      isLoading: false // Añadir esta línea
     };
   },
   methods: {
@@ -404,7 +411,8 @@ export default {
 
           try {
               const response = await apiClient.post('/api/productos/csv', formData, {
-                  headers: { 'Content-Type': 'multipart/form-data' }
+                  headers: { 'Content-Type': 'multipart/form-data' },
+                  timeout: 60000 // 60 segundos
               });
 
               // Extraer datos de la respuesta
@@ -443,11 +451,27 @@ export default {
               // Volver a consultar los productos para reflejar los cambios
               this.consultarProductos();
 
-          } catch (error) {
-              console.error('Error al cargar archivo CSV:', error);
-              alert("❌ Error al cargar el archivo CSV. Revisa la consola para más detalles.");
-          }
+            } catch (error) {
+                console.error('Error al cargar archivo CSV:', error);
+                let mensajeError = "❌ Error al cargar el archivo CSV.";
+                if (error.code === 'ECONNABORTED') {
+                    mensajeError += " La solicitud tardó demasiado. Intenta con un archivo más pequeño o contacta al soporte.";
+                } else if (error.response) {
+                    mensajeError += ` Detalles: ${error.response.data.error || 'Error desconocido'}`;
+                }
+                alert(mensajeError);
+            }
       },
+      async procesarCsv() {
+            this.isLoading = true; // Mostrar spinner
+            try {
+                // Código existente
+            } catch (error) {
+                // Código existente
+            } finally {
+                this.isLoading = false; // Ocultar spinner
+            }
+        },
 
       // Sincroniza el input con el selector cuando el usuario escribe un código
       sincronizarSelector(index) {
@@ -1239,6 +1263,33 @@ h2, h3 {
   resize: none;
 }
 
+/* Spinner */
+.spinner-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.spinner {
+  border: 4px solid #f3f3f3; /* Color claro */
+  border-top: 4px solid #007bff; /* Color principal */
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 10px;
+}
+
+.spinner-container p {
+  color: #555;
+  font-size: 14px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 
 </style>
 

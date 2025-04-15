@@ -790,8 +790,6 @@ def create_app():
             return jsonify({'error': f'Error al agregar material: {str(e)}'}), 500
 
 
-
-
     @app.route('/api/productos/csv', methods=['POST'])
     def cargar_productos_csv():
         if 'file' not in request.files:
@@ -804,46 +802,22 @@ def create_app():
         try:
             stream = TextIOWrapper(file.stream, encoding='utf-8')
             reader = csv.DictReader(stream)
-            productos_data = list(reader)  # Leer todo el CSV
 
-            # Cargar productos existentes
-            productos_existentes = Producto.query.with_entities(Producto.codigo, Producto.nombre).all()
-            codigos_existentes = {p.codigo for p in productos_existentes}
-            nombres_existentes = {p.nombre for p in productos_existentes}
+            productos_duplicados = []  # Productos que ya existen
+            productos_creados = []  # Productos nuevos creados
+            errores = []  # Lista de errores detallados
 
-            # Cargar productos base
-            codigos_base = set()
-            for row in productos_data:
-                if row['es_producto_compuesto'].strip().lower() == "si":
-                    for i in range(1, int(row.get('cantidad_productos', 0)) + 1):
-                        codigo_base = row.get(f'codigo{i}', '').strip()
-                        if codigo_base:
-                            codigos_base.add(codigo_base)
-            productos_base = Producto.query.filter(Producto.codigo.in_(codigos_base)).all()
-            productos_base_dict = {p.codigo: (p.id, p.peso_unidad_gr) for p in productos_base}
-
-            productos = []
-            materiales = []
-            productos_creados = []
-            errores = []
-            batch_size = 100
-            productos_compuestos_ids = []
-
-            for row in productos_data:
+            for row in reader:
                 codigo = row['codigo'].strip()
                 nombre = row['nombre'].strip()
                 es_producto_compuesto = row['es_producto_compuesto'].strip().lower() == "si"
-                cantidad_productos = int(row['cantidad_productos']) if row.get('cantidad_productos', '') else 0
+                cantidad_productos = int(row['cantidad_productos']) if row['cantidad_productos'] else 0
                 stock_minimo = row.get('stock_minimo', '').strip()
-                try:
-                    stock_minimo = int(float(stock_minimo)) if stock_minimo else None  # Convertir a int
-                except ValueError:
-                    errores.append(f"⚠️ ERROR en código {codigo}: El campo 'stock_minimo' debe ser un número entero o estar vacío.")
-                    continue
+                stock_minimo = float(stock_minimo) if stock_minimo else None  # Convertir a float o dejar como None
 
-                # Validar duplicados
-                if codigo in codigos_existentes or nombre in nombres_existentes:
-                    errores.append(f"⚠️ ERROR en código {codigo}: Ya existe un producto con este código o nombre.")
+                # 🛑 Validar que el producto no exista ya en la BD
+                if Producto.query.filter((Producto.codigo == codigo) | (Producto.nombre == nombre)).first():
+                    errores.append(f"⚠️ ERROR en código {codigo}: Ya existe un producto con este código o nombre en la BD.")
                     continue
 
                 if not codigo or not nombre:
@@ -851,63 +825,80 @@ def create_app():
                     continue
 
                 if es_producto_compuesto:
-                    if row.get('peso_total_gr', '').strip() or row.get('peso_unidad_gr', '').strip():
-                        errores.append(f"⚠️ ERROR en código {codigo}: No debe incluir peso_total_gr ni peso_unidad_gr.")
+                    # ✅ Validar que no tenga peso_total_gr o peso_unidad_gr definido
+                    if row['peso_total_gr'].strip() or row['peso_unidad_gr'].strip():
+                        errores.append(f"⚠️ ERROR en código {codigo}: No debe incluir peso_total_gr ni peso_unidad_gr porque es un producto compuesto.")
                         continue
+
+                    # ✅ Validar que la cantidad de productos base sea mayor a 0
                     if cantidad_productos < 1:
                         errores.append(f"⚠️ ERROR en código {codigo}: Debe incluir al menos un producto base.")
                         continue
 
-                    materiales_row = []
+                    # ✅ Validar que los productos base existan y aceptar cantidades decimales
+                    materiales = []
                     for i in range(1, cantidad_productos + 1):
                         codigo_base = row.get(f'codigo{i}', '').strip()
                         cantidad_base_str = row.get(f'cantidad{i}', '0').strip()
+                        
+                        # Convertir cantidad_base a float, permitiendo decimales
                         try:
                             cantidad_base = float(cantidad_base_str) if cantidad_base_str else 0.0
                         except ValueError:
-                            errores.append(f"⚠️ ERROR en código {codigo}: La cantidad en 'cantidad{i}' no es válida.")
+                            errores.append(f"⚠️ ERROR en código {codigo}: La cantidad en 'cantidad{i}' ('{cantidad_base_str}') no es un número válido.")
                             continue
 
                         if not codigo_base or cantidad_base <= 0:
                             errores.append(f"⚠️ ERROR en código {codigo}: La información en 'codigo{i}' o 'cantidad{i}' es inválida.")
                             continue
 
-                        producto_base = productos_base_dict.get(codigo_base)
+                        producto_base = Producto.query.filter_by(codigo=codigo_base).first()
                         if not producto_base:
-                            errores.append(f"⚠️ ERROR en código {codigo}: El producto base '{codigo_base}' no existe.")
+                            errores.append(f"⚠️ ERROR en código {codigo}: El producto base '{codigo_base}' no existe en la BD.")
                             continue
 
-                        materiales_row.append({
-                            'producto_base_id': producto_base[0],
-                            'cantidad': cantidad_base,
-                            'peso_unitario': producto_base[1]
-                        })
+                        materiales.append((producto_base.id, cantidad_base, producto_base.peso_unidad_gr))
 
                     if errores:
-                        continue
+                        continue  # Si hay errores, no creamos el producto compuesto
 
+                    # ✅ Crear el producto compuesto
                     producto = Producto(
                         codigo=codigo,
                         nombre=nombre,
-                        peso_total_gr=0,
-                        peso_unidad_gr=0,
+                        peso_total_gr=0,  # Se calculará después
+                        peso_unidad_gr=0,  # Se calculará después
                         codigo_barras=row.get('codigo_barras', None),
                         es_producto_compuesto=True,
                         stock_minimo=stock_minimo
                     )
-                    productos.append(producto)
-                    productos_compuestos_ids.append(producto)  # Guardar para asignar IDs después
-                    for material in materiales_row:
-                        materiales.append({
-                            'producto_base_id': material['producto_base_id'],
-                            'cantidad': material['cantidad'],
-                            'peso_unitario': material['peso_unitario']
-                        })
+                    db.session.add(producto)
+                    db.session.commit()
+
+                    # ✅ Agregar los materiales con cantidades decimales
+                    for material in materiales:
+                        nuevo_material = MaterialProducto(
+                            producto_compuesto_id=producto.id,
+                            producto_base_id=material[0],
+                            cantidad=material[1],  # Ahora es float
+                            peso_unitario=material[2]
+                        )
+                        db.session.add(nuevo_material)
+
+                    db.session.commit()
+
+                    # ✅ Calcular el peso del producto compuesto
+                    recalcular_peso_producto_compuesto(producto.id)
+
+                    productos_creados.append(codigo)
+
                 else:
-                    if not row.get('peso_total_gr', '').strip() or not row.get('peso_unidad_gr', '').strip():
-                        errores.append(f"⚠️ ERROR en código {codigo}: Debe incluir 'peso_total_gr' y 'peso_unidad_gr'.")
+                    # ✅ Validar que los productos a granel tengan peso_total_gr y peso_unidad_gr
+                    if not row['peso_total_gr'].strip() or not row['peso_unidad_gr'].strip():
+                        errores.append(f"⚠️ ERROR en código {codigo}: Debe incluir 'peso_total_gr' y 'peso_unidad_gr' para productos a granel.")
                         continue
 
+                    # ✅ Crear el producto base
                     producto = Producto(
                         codigo=codigo,
                         nombre=nombre,
@@ -917,84 +908,15 @@ def create_app():
                         es_producto_compuesto=False,
                         stock_minimo=stock_minimo
                     )
-                    productos.append(producto)
+                    db.session.add(producto)
                     productos_creados.append(codigo)
 
-                if len(productos) >= batch_size:
-                    db.session.bulk_save_objects(productos)
-                    db.session.commit()
-
-                    # Asignar IDs a materiales
-                    for i, p in enumerate(productos):
-                        if p.es_producto_compuesto:
-                            for m in materiales:
-                                if 'temp_id' in m and m['temp_id'] == id(p):
-                                    m['producto_compuesto_id'] = p.id
-                            productos_creados.append(p.codigo)
-
-                    # Guardar materiales
-                    material_objects = [
-                        MaterialProducto(
-                            producto_compuesto_id=m['producto_compuesto_id'],
-                            producto_base_id=m['producto_base_id'],
-                            cantidad=m['cantidad'],
-                            peso_unitario=m['peso_unitario']
-                        )
-                        for m in materiales if 'producto_compuesto_id' in m
-                    ]
-                    if material_objects:
-                        db.session.bulk_save_objects(material_objects)
-                        db.session.commit()
-
-                    productos = []
-                    materiales = []
-
-            if productos:
-                db.session.bulk_save_objects(productos)
-                db.session.commit()
-
-                for i, p in enumerate(productos):
-                    if p.es_producto_compuesto:
-                        for m in materiales:
-                            if 'temp_id' in m and m['temp_id'] == id(p):
-                                m['producto_compuesto_id'] = p.id
-                        productos_creados.append(p.codigo)
-
-                material_objects = [
-                    MaterialProducto(
-                        producto_compuesto_id=m['producto_compuesto_id'],
-                        producto_base_id=m['producto_base_id'],
-                        cantidad=m['cantidad'],
-                        peso_unitario=m['peso_unitario']
-                    )
-                    for m in materiales if 'producto_compuesto_id' in m
-                ]
-                if material_objects:
-                    db.session.bulk_save_objects(material_objects)
-                    db.session.commit()
-
-            # Calcular pesos en lote
-            producto_ids = [p.id for p in productos_compuestos_ids if p.id]
-            if producto_ids:
-                result = db.session.query(
-                    MaterialProducto.producto_compuesto_id,
-                    func.sum(MaterialProducto.cantidad * MaterialProducto.peso_unitario).label('peso_total')
-                ).filter(
-                    MaterialProducto.producto_compuesto_id.in_(producto_ids)
-                ).group_by(
-                    MaterialProducto.producto_compuesto_id
-                ).all()
-                pesos = {row.producto_compuesto_id: row.peso_total for row in result}
-                for producto_id, peso_total in pesos.items():
-                    db.session.query(Producto).filter_by(id=producto_id).update({
-                        'peso_total_gr': peso_total,
-                        'peso_unidad_gr': peso_total
-                    })
                 db.session.commit()
 
             return jsonify({
                 'message': '✅ Carga de productos completada.',
                 'productos_creados': productos_creados,
+                'productos_duplicados': productos_duplicados,
                 'errores': errores
             }), 201
 
@@ -1002,7 +924,7 @@ def create_app():
             db.session.rollback()
             print(f"Error al cargar productos desde CSV: {str(e)}")
             return jsonify({'error': 'Ocurrió un error al cargar productos desde CSV'}), 500
-    
+
     
     @app.route('/api/productos/<int:producto_id>', methods=['PUT'])
     def actualizar_producto(producto_id):
