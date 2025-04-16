@@ -990,7 +990,203 @@ def create_app():
             print(f"Error al cargar productos desde CSV: {str(e)}")
             return jsonify({'error': f'Ocurrió un error al cargar productos desde CSV: {str(e)}'}), 500
     
-    
+
+    # Endpoint para Actualizar productos masivamente mediante .CSV
+    @app.route('/api/productos/actualizar-csv', methods=['POST'])
+    def actualizar_productos_csv():
+        if 'file' not in request.files:
+            return jsonify({'error': 'No se ha proporcionado un archivo'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'Archivo no seleccionado'}), 400
+
+        try:
+            stream = TextIOWrapper(file.stream, encoding='utf-8')
+            reader = csv.DictReader(stream)
+            productos_data = list(reader)
+
+            # Cargar productos existentes
+            productos_existentes = Producto.query.with_entities(Producto.id, Producto.codigo, Producto.nombre).all()
+            codigos_existentes = {p.codigo: p.id for p in productos_existentes}
+            nombres_existentes = {p.nombre: p.id for p in productos_existentes}
+
+            # Cargar productos base para validar materiales
+            codigos_base = set()
+            for row in productos_data:
+                if row.get('es_producto_compuesto', '').strip().lower() == "si":
+                    for i in range(1, int(row.get('cantidad_productos', 0)) + 1):
+                        codigo_base = row.get(f'codigo{i}', '').strip()
+                        if codigo_base:
+                            codigos_base.add(codigo_base)
+            productos_base = Producto.query.filter(Producto.codigo.in_(codigos_base)).all()
+            productos_base_dict = {p.codigo: (p.id, p.peso_unidad_gr) for p in productos_base}
+
+            productos_actualizados = []
+            productos_no_encontrados = []
+            errores = []
+            batch_size = 100
+            materiales_actualizados = []
+
+            for row in productos_data:
+                codigo = row.get('codigo', '').strip()
+                if not codigo:
+                    errores.append("⚠️ ERROR: El campo 'codigo' es obligatorio.")
+                    continue
+
+                # Verificar si el producto existe
+                producto_id = codigos_existentes.get(codigo)
+                if not producto_id:
+                    productos_no_encontrados.append(codigo)
+                    continue
+
+                nombre = row.get('nombre', '').strip()
+                es_producto_compuesto = row.get('es_producto_compuesto', '').strip().lower() == "si"
+                stock_minimo = row.get('stock_minimo', '').strip()
+                codigo_barras = row.get('codigo_barras', '').strip() or None
+
+                # Validar stock_minimo
+                try:
+                    stock_minimo = int(float(stock_minimo)) if stock_minimo else None
+                except ValueError:
+                    errores.append(f"⚠️ ERROR en código {codigo}: El campo 'stock_minimo' debe ser un número entero o estar vacío.")
+                    continue
+
+                # Validar nombre único (excluyendo el producto actual)
+                if nombre and nombre in nombres_existentes and nombres_existentes[nombre] != producto_id:
+                    errores.append(f"⚠️ ERROR en código {codigo}: El nombre '{nombre}' ya está en uso por otro producto.")
+                    continue
+
+                # Validar campos según tipo de producto
+                if es_producto_compuesto:
+                    if row.get('peso_total_gr', '').strip() or row.get('peso_unidad_gr', '').strip():
+                        errores.append(f"⚠️ ERROR en código {codigo}: Productos compuestos no deben incluir 'peso_total_gr' ni 'peso_unidad_gr'.")
+                        continue
+                    cantidad_productos = int(row.get('cantidad_productos', 0)) if row.get('cantidad_productos', '') else 0
+                    if cantidad_productos < 1:
+                        errores.append(f"⚠️ ERROR en código {codigo}: Debe incluir al menos un producto base.")
+                        continue
+
+                    materiales_row = []
+                    for i in range(1, cantidad_productos + 1):
+                        codigo_base = row.get(f'codigo{i}', '').strip()
+                        cantidad_base_str = row.get(f'cantidad{i}', '0').strip()
+                        try:
+                            cantidad_base = float(cantidad_base_str) if cantidad_base_str else 0.0
+                        except ValueError:
+                            errores.append(f"⚠️ ERROR en código {codigo}: La cantidad en 'cantidad{i}' no es válida.")
+                            continue
+
+                        if not codigo_base or cantidad_base <= 0:
+                            errores.append(f"⚠️ ERROR en código {codigo}: La información en 'codigo{i}' o 'cantidad{i}' es inválida.")
+                            continue
+
+                        producto_base = productos_base_dict.get(codigo_base)
+                        if not producto_base:
+                            errores.append(f"⚠️ ERROR en código {codigo}: El producto base '{codigo_base}' no existe.")
+                            continue
+
+                        materiales_row.append({
+                            'producto_base_id': producto_base[0],
+                            'cantidad': cantidad_base,
+                            'peso_unitario': producto_base[1]
+                        })
+
+                    if not materiales_row:
+                        errores.append(f"⚠️ ERROR en código {codigo}: No se especificaron materiales válidos.")
+                        continue
+
+                else:
+                    peso_total_gr = row.get('peso_total_gr', '').strip()
+                    peso_unidad_gr = row.get('peso_unidad_gr', '').strip()
+                    try:
+                        peso_total_gr = float(peso_total_gr) if peso_total_gr else None
+                        peso_unidad_gr = float(peso_unidad_gr) if peso_unidad_gr else None
+                    except ValueError:
+                        errores.append(f"⚠️ ERROR en código {codigo}: 'peso_total_gr' y 'peso_unidad_gr' deben ser números válidos.")
+                        continue
+
+                    if peso_total_gr is None or peso_unidad_gr is None:
+                        errores.append(f"⚠️ ERROR en código {codigo}: Productos base deben incluir 'peso_total_gr' y 'peso_unidad_gr'.")
+                        continue
+
+                # Actualizar producto
+                update_data = {
+                    'nombre': nombre,
+                    'codigo_barras': codigo_barras,
+                    'es_producto_compuesto': es_producto_compuesto,
+                    'stock_minimo': stock_minimo
+                }
+                if not es_producto_compuesto:
+                    update_data['peso_total_gr'] = peso_total_gr
+                    update_data['peso_unidad_gr'] = peso_unidad_gr
+                else:
+                    update_data['peso_total_gr'] = 0
+                    update_data['peso_unidad_gr'] = 0
+
+                db.session.query(Producto).filter_by(id=producto_id).update(update_data)
+
+                # Actualizar materiales para productos compuestos
+                if es_producto_compuesto:
+                    # Eliminar materiales existentes
+                    db.session.query(MaterialProducto).filter_by(producto_compuesto_id=producto_id).delete()
+                    # Agregar nuevos materiales
+                    for material in materiales_row:
+                        materiales_actualizados.append(MaterialProducto(
+                            producto_compuesto_id=producto_id,
+                            producto_base_id=material['producto_base_id'],
+                            cantidad=material['cantidad'],
+                            peso_unitario=material['peso_unitario']
+                        ))
+
+                productos_actualizados.append(codigo)
+
+                if len(productos_actualizados) % batch_size == 0:
+                    db.session.commit()
+                    if materiales_actualizados:
+                        db.session.bulk_save_objects(materiales_actualizados)
+                        db.session.commit()
+                    materiales_actualizados = []
+
+            # Commit final
+            db.session.commit()
+            if materiales_actualizados:
+                db.session.bulk_save_objects(materiales_actualizados)
+                db.session.commit()
+
+            # Calcular pesos para productos compuestos actualizados
+            producto_ids = [codigos_existentes[codigo] for codigo in productos_actualizados
+                        if Producto.query.get(codigos_existentes[codigo]).es_producto_compuesto]
+            if producto_ids:
+                result = db.session.query(
+                    MaterialProducto.producto_compuesto_id,
+                    func.sum(MaterialProducto.cantidad * MaterialProducto.peso_unitario).label('peso_total')
+                ).filter(
+                    MaterialProducto.producto_compuesto_id.in_(producto_ids)
+                ).group_by(
+                    MaterialProducto.producto_compuesto_id
+                ).all()
+                pesos = {row.producto_compuesto_id: row.peso_total for row in result}
+                for producto_id, peso_total in pesos.items():
+                    db.session.query(Producto).filter_by(id=producto_id).update({
+                        'peso_total_gr': peso_total,
+                        'peso_unidad_gr': peso_total
+                    })
+                db.session.commit()
+
+            return jsonify({
+                'message': '✅ Actualización de productos completada.',
+                'productos_actualizados': productos_actualizados,
+                'productos_no_encontrados': productos_no_encontrados,
+                'errores': errores
+            }), 200
+
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error al actualizar productos desde CSV: {str(e)}")
+            return jsonify({'error': f'Ocurrió un error al actualizar productos desde CSV: {str(e)}'}), 500
+
+
     @app.route('/api/productos/<int:producto_id>', methods=['PUT'])
     def actualizar_producto(producto_id):
         try:

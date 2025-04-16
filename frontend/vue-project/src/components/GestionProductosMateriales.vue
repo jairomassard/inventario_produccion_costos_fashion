@@ -54,6 +54,37 @@
       </div>
   </section>
 
+   <!-- Nueva sección: Actualización masiva de productos -->
+   <section class="card">
+      <h2>Actualización masiva de productos</h2>
+      <p>Sube un archivo CSV para actualizar productos existentes.</p>
+      <input
+        ref="inputActualizarCsv"
+        type="file"
+        accept=".csv"
+        @change="cargarArchivoActualizarCsv"
+        class="input-file"
+      />
+      <div class="button-group">
+        <button @click="procesarActualizacionCsv" :disabled="!archivoActualizarCsv || isLoading">
+          Procesar CSV
+        </button>
+        <button @click="limpiarActualizarCsv" :disabled="!archivoActualizarCsv || isLoading">
+          Limpiar
+        </button>
+        <a @click="descargarPlantillaActualizarCSV">Descargar plantilla</a>
+        <a @click="mostrarInstructivoActualizar">Ver instructivo</a>
+      </div>
+      <div v-if="isLoading" class="spinner-container">
+        <div class="spinner"></div>
+        <p>Procesando archivo CSV de actualización, por favor espera...</p>
+      </div>
+      <div v-if="erroresActualizarCsv" class="errores-csv">
+        <pre>{{ erroresActualizarCsv }}</pre>
+        <button @click="copiarErroresActualizar">Copiar errores</button>
+      </div>
+    </section>
+
 
     <!-- Formulario para Crear/Editar Producto -->
     <section>
@@ -263,7 +294,9 @@ export default {
       offset: 0,
       limit: 50, // Valor por defecto
       archivoCsv: null,
+      archivoActualizarCsv: null,
       erroresCsv: '',
+      erroresActualizarCsv: '',
       mostrarModal: false,
       isLoading: false // Añadir esta línea
     };
@@ -391,16 +424,119 @@ export default {
           }
       },
 
+      // Nuevos métodos para actualización
+        cargarArchivoActualizarCsv(event) {
+            this.archivoActualizarCsv = event.target.files[0];
+            this.erroresActualizarCsv = '';
+        },
+        async procesarActualizacionCsv() {
+            if (!this.archivoActualizarCsv) {
+                alert("Por favor, selecciona un archivo CSV para actualizar.");
+                return;
+            }
+            this.isLoading = true;
+            try {
+                const formData = new FormData();
+                formData.append('file', this.archivoActualizarCsv);
+                const response = await apiClient.post('/api/productos/actualizar-csv', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                timeout: 60000
+                });
+
+                const { message, productos_actualizados, productos_no_encontrados, errores } = response.data;
+                let mensaje = `✅ ${message}\n\n`;
+                if (productos_actualizados.length) {
+                mensaje += `✔ Productos actualizados: ${productos_actualizados.join(', ')}\n`;
+                }
+                if (productos_no_encontrados.length) {
+                mensaje += `⚠️ Productos no encontrados: ${productos_no_encontrados.join(', ')}\n`;
+                }
+                if (errores.length) {
+                mensaje += `🛑 Errores detectados:\n- ${errores.join('\n- ')}\n\n`;
+                }
+                alert(mensaje);
+
+                if (errores.length || productos_no_encontrados.length) {
+                this.erroresActualizarCsv = `⚠️ Reporte de errores:\n\n`;
+                if (productos_no_encontrados.length) {
+                    this.erroresActualizarCsv += `🔹 Productos no encontrados:\n- ${productos_no_encontrados.join('\n- ')}\n\n`;
+                }
+                if (errores.length) {
+                    this.erroresActualizarCsv += `🛑 Errores:\n- ${errores.join('\n- ')}\n`;
+                }
+                } else {
+                this.erroresActualizarCsv = '';
+                }
+
+                this.archivoActualizarCsv = null;
+                this.$refs.inputActualizarCsv.value = '';
+                this.consultarProductos();
+            } catch (error) {
+                console.error('Error al actualizar productos desde CSV:', error);
+                let mensajeError = "❌ Error al actualizar productos desde CSV.";
+                if (error.code === 'ECONNABORTED') {
+                mensajeError += " La solicitud tardó demasiado. Intenta con un archivo más pequeño.";
+                } else if (error.response) {
+                mensajeError += ` Detalles: ${error.response.data.error || 'Error desconocido'}`;
+                }
+                alert(mensajeError);
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        limpiarActualizarCsv() {
+        this.archivoActualizarCsv = null;
+        this.$refs.inputActualizarCsv.value = '';
+        this.erroresActualizarCsv = '';
+        },
+        descargarPlantillaActualizarCSV() {
+        const csvContent =
+            `# Instructivo: Llene los campos para actualizar productos existentes.\n` +
+            `# 'codigo' es obligatorio y debe coincidir con un producto existente.\n` +
+            `# Los demás campos son opcionales; déjelos en blanco para no modificarlos.\n` +
+            `# Si 'es_producto_compuesto' es 'Sí', complete 'cantidad_productos', 'codigo1', 'cantidad1', etc.\n` +
+            `# Los productos base deben existir.\n` +
+            `# Nota: El código y el nombre deben ser únicos.\n` +
+            `codigo,nombre,peso_total_gr,peso_unidad_gr,codigo_barras,es_producto_compuesto,stock_minimo,cantidad_productos,codigo1,cantidad1,codigo2,cantidad2\n` +
+            `GRA12345678901234,Producto Base Actualizado,600,60,1234567890123,No,150,,,,\n` +
+            `GRA98765432109876,Kit Compuesto Actualizado,,,9876543210987,Si,20,2,GRA12345678901234,3,GRA12199905000000,4\n`;
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+        saveAs(blob, 'plantilla_actualizacion_productos.csv');
+        },
+        mostrarInstructivoActualizar() {
+        alert(
+            `📋 **Instructivo para actualizar productos desde CSV**\n\n` +
+            `1️⃣ **Código**: Código del producto existente (obligatorio).\n` +
+            `2️⃣ **Nombre**: Nuevo nombre del producto (debe ser único).\n` +
+            `3️⃣ **Peso Total (gr)**: Peso total para productos base.\n` +
+            `4️⃣ **Peso Unidad (gr)**: Peso por unidad para productos base.\n` +
+            `5️⃣ **Código de Barras**: Código de barras (opcional).\n` +
+            `6️⃣ **Es Producto Compuesto**: 'Sí' o 'No'.\n` +
+            `7️⃣ **Stock Mínimo**: Número entero o vacío (opcional).\n` +
+            `8️⃣ **Cantidad Productos**: Número de productos base para compuestos.\n` +
+            `9️⃣ **Código1, Cantidad1, etc.**: Materiales para productos compuestos.\n\n` +
+            `📝 **Notas**:\n` +
+            `- Los campos vacíos no modificarán los valores existentes.\n` +
+            `- Los productos base deben existir.\n` +
+            `- El nombre debe ser único en el sistema.`
+        );
+        },
+        copiarErroresActualizar() {
+            navigator.clipboard.writeText(this.erroresActualizarCsv);
+            alert('Errores copiados al portapapeles.');
+        },
+
 
       async cargarMasProductos() {
-      try {
-          this.offset += this.limit;
-          const response = await apiClient.get(`/api/productos?offset=${this.offset}&limit=${this.limit}`);
-          const nuevosProductos = response.data.productos.sort((a, b) => a.nombre.localeCompare(b.nombre));
-          this.productos = [...this.productos, ...nuevosProductos];
-      } catch (error) {
-          console.error('Error al cargar más productos:', error);
-      }
+        try {
+            this.offset += this.limit;
+            const response = await apiClient.get(`/api/productos?offset=${this.offset}&limit=${this.limit}`);
+            const nuevosProductos = response.data.productos.sort((a, b) => a.nombre.localeCompare(b.nombre));
+            this.productos = [...this.productos, ...nuevosProductos];
+        } catch (error) {
+            console.error('Error al cargar más productos:', error);
+        }
       },
       cargarCsv(event) {
       this.archivoCsv = event.target.files[0];
@@ -1275,6 +1411,89 @@ h2, h3 {
 .spinner-container p {
   color: #555;
   font-size: 14px;
+}
+
+.card {
+  background: #fff;
+  padding: 20px;
+  margin-bottom: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.input-file {
+  margin: 10px 0;
+}
+
+.button-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.button-group button,
+.button-group a {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.button-group button {
+  background: #28a745;
+  color: white;
+}
+
+.button-group button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.button-group a {
+  background: #007bff;
+  color: white;
+  display: inline-block;
+}
+
+.spinner-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 20px;
+}
+
+.spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.errores-csv {
+  margin-top: 20px;
+  background: #f8d7da;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.errores-csv pre {
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.errores-csv button {
+  background: #dc3545;
+  color: white;
+  margin-top: 10px;
 }
 
 @keyframes spin {
