@@ -597,7 +597,6 @@ def create_app():
     @app.route('/api/productos', methods=['GET', 'POST'])
     def gestionar_productos():
         if request.method == 'POST':
-            # Sin cambios
             data = request.get_json()
             nuevo_producto = Producto(
                 codigo=data['codigo'],
@@ -612,17 +611,14 @@ def create_app():
             db.session.commit()
             return jsonify({'message': 'Producto creado correctamente'}), 201
 
-        # Parámetros de consulta para paginación
         offset = int(request.args.get('offset', 0))
         limit = int(request.args.get('limit', 50))
         search_codigo = request.args.get('search_codigo', '')
         search_nombre = request.args.get('search_nombre', '')
         producto_base_ids = request.args.get('producto_base_ids', '')
 
-        # Construir la consulta base
         query = Producto.query
 
-        # Filtros
         if search_codigo:
             query = query.filter(Producto.codigo.ilike(f'%{search_codigo}%'))
         if search_nombre:
@@ -632,10 +628,8 @@ def create_app():
             if ids:
                 query = query.filter(Producto.id.in_(ids))
 
-        # Total de productos (sin paginación)
         total = query.count()
 
-        # Si el usuario selecciona "Todos" (limit=0), no aplicar paginación
         if limit == 0:
             productos = query.order_by(Producto.codigo.asc()).all()
         else:
