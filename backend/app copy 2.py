@@ -597,7 +597,7 @@ def create_app():
     @app.route('/api/productos', methods=['GET', 'POST'])
     def gestionar_productos():
         if request.method == 'POST':
-            # Sin cambios
+            # Crear un nuevo producto
             data = request.get_json()
             nuevo_producto = Producto(
                 codigo=data['codigo'],
@@ -606,18 +606,19 @@ def create_app():
                 peso_unidad_gr=data['peso_unidad_gr'],
                 codigo_barras=data['codigo_barras'],
                 es_producto_compuesto=data['es_producto_compuesto'],
-                stock_minimo=data.get('stock_minimo', None)
+                stock_minimo=data.get('stock_minimo', None)  # Nuevo campo opcional
             )
             db.session.add(nuevo_producto)
             db.session.commit()
             return jsonify({'message': 'Producto creado correctamente'}), 201
 
         # Parámetros de consulta para paginación
-        offset = int(request.args.get('offset', 0))
-        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))  # Desplazamiento
+        limit = int(request.args.get('limit', 50))   # Valor por defecto 50
+
+        # Parámetros de búsqueda
         search_codigo = request.args.get('search_codigo', '')
         search_nombre = request.args.get('search_nombre', '')
-        producto_base_ids = request.args.get('producto_base_ids', '')
 
         # Construir la consulta base
         query = Producto.query
@@ -627,9 +628,6 @@ def create_app():
             query = query.filter(Producto.codigo.ilike(f'%{search_codigo}%'))
         if search_nombre:
             query = query.filter(Producto.nombre.ilike(f'%{search_nombre}%'))
-        if producto_base_ids:
-            ids = [int(id) for id in producto_base_ids.split(',') if id.isdigit()]
-            query = query.filter(Producto.id.in_(ids))
 
         # Total de productos (sin paginación)
         total = query.count()
@@ -640,6 +638,7 @@ def create_app():
         else:
             productos = query.order_by(Producto.codigo.asc()).offset(offset).limit(limit).all()
 
+        # Devolver siempre una respuesta válida, incluso si no hay productos
         return jsonify({
             'productos': [{
                 'id': p.id,
@@ -649,7 +648,7 @@ def create_app():
                 'peso_unidad_gr': float(p.peso_unidad_gr) if p.peso_unidad_gr is not None else None,
                 'codigo_barras': p.codigo_barras,
                 'es_producto_compuesto': p.es_producto_compuesto,
-                'stock_minimo': p.stock_minimo
+                'stock_minimo': p.stock_minimo  # Nuevo campo en la respuesta
             } for p in productos],
             'total': total
         }), 200

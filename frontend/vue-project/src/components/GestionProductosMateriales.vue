@@ -358,42 +358,79 @@ methods: {
 
         try {
             const response = await apiClient.get(`/api/materiales-producto/${this.producto.id}`);
-            console.log('Materiales recibidos del endpoint:', response.data.materiales); // Log 1: Ver respuesta cruda
+            console.log('Materiales recibidos del endpoint:', response.data.materiales);
             this.materiales = response.data.materiales.map((material, index) => {
                 const productoBase = this.productosDisponibles.find(p => p.id === material.producto_base_id);
-                console.log(`Material ${index + 1}:`, material, 'Producto base:', productoBase); // Log 2: Ver cada material
+                console.log(`Material ${index + 1}:`, material, 'Producto base:', productoBase);
                 return {
                     id: material.id,
                     producto_base: material.producto_base_id,
-                    nombreDigitado: productoBase ? productoBase.nombre : '', // Para el input de nombre
-                    codigoDigitado: productoBase ? productoBase.codigo : '', // Para el input de código
+                    nombreDigitado: productoBase ? productoBase.nombre : 'Producto no encontrado',
+                    codigoDigitado: productoBase ? productoBase.codigo : 'N/A',
                     cantidad: material.cantidad,
-                    peso_unitario: productoBase ? productoBase.peso_unidad_gr : material.peso_unitario, // Usar peso del endpoint si no hay productoBase
+                    peso_unitario: productoBase ? productoBase.peso_unidad_gr : material.peso_unitario,
                     peso_total: material.cantidad * (productoBase ? productoBase.peso_unidad_gr : material.peso_unitario)
                 };
             });
-            console.log('Materiales asignados a this.materiales:', this.materiales); // Log 3: Ver array final
+            console.log('Materiales asignados a this.materiales:', this.materiales);
             this.actualizarPesoProductoCompuesto();
         } catch (error) {
-            console.error("Error al cargar materiales del producto:", error);
-            alert("No se pudieron cargar los materiales del producto compuesto.");
+            console.error('Error al cargar materiales del producto:', error);
+            if (error.response && error.response.status === 404) {
+                console.log(`No se encontraron materiales para el producto ${this.producto.id}`);
+                this.materiales = [];
+            } else {
+                alert('No se pudieron cargar los materiales del producto compuesto.');
+            }
         }
     },
-    async cargarProductosDisponibles() {
+    async cargarProductosDisponibles(materiales = []) {
         try {
-            const response = await apiClient.get('/api/productos', { 
-                params: { limit: 10000 } // Aumentar límite
-            });
-            this.productosDisponibles = response.data.productos
+            // Cargar productos base necesarios para los materiales
+            let productosNecesarios = [];
+            if (materiales.length > 0) {
+                const productoBaseIds = materiales.map(m => m.producto_base_id);
+                const response = await apiClient.get('/api/productos', {
+                    params: {
+                        producto_base_ids: productoBaseIds.join(',')
+                    }
+                });
+                productosNecesarios = response.data.productos;
+                console.log('Productos base cargados:', productosNecesarios);
+            }
+
+            // Cargar productos adicionales con paginación
+            let offset = 0;
+            const limit = 500;
+            let masProductos = true;
+            const productosAdicionales = [];
+
+            while (masProductos) {
+                const response = await apiClient.get('/api/productos', {
+                    params: { offset, limit }
+                });
+                const nuevosProductos = response.data.productos;
+                productosAdicionales.push(...nuevosProductos);
+                offset += limit;
+                masProductos = nuevosProductos.length === limit;
+            }
+
+            // Combinar productos necesarios y adicionales, eliminando duplicados
+            const todosProductos = [...productosNecesarios, ...productosAdicionales];
+            const productosUnicos = Array.from(
+                new Map(todosProductos.map(p => [p.id, p])).values()
+            );
+
+            this.productosDisponibles = productosUnicos
                 .sort((a, b) => a.codigo.localeCompare(b.codigo));
-            console.log("Productos disponibles cargados:", this.productosDisponibles);
+            console.log('Productos disponibles cargados:', this.productosDisponibles);
         } catch (error) {
-            console.error("Error al cargar productos disponibles:", error);
+            console.error('Error al cargar productos disponibles:', error);
             if (error.response && error.response.status === 401) {
-                alert("Sesión expirada. Por favor, inicia sesión nuevamente.");
+                alert('Sesión expirada. Por favor, inicia sesión nuevamente.');
                 this.$router.push('/login');
             } else {
-                alert("No se pudieron cargar los productos disponibles.");
+                alert('No se pudieron cargar todos los productos disponibles. Algunos materiales podrían no mostrarse correctamente.');
             }
         }
     },
@@ -638,11 +675,11 @@ methods: {
     },
 
     editarProducto(producto) {
-    this.modoEdicion = true;
-    this.producto = { ...producto };
-    this.cargarProductosDisponibles().then(() => {
-        this.cargarMaterialesProducto();
-    }); // Copia los datos del producto al formulario
+        this.modoEdicion = true;
+        this.producto = { ...producto };
+        this.cargarMaterialesProducto().then(() => {
+            this.cargarProductosDisponibles(this.materiales);
+        });
     },
     async actualizarProducto() {
         console.log('Datos enviados:', this.producto); // Depurar datos enviados
