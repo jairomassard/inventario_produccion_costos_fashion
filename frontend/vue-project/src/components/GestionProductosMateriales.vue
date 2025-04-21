@@ -384,52 +384,37 @@ methods: {
             }
         }
     },
-    async cargarProductosDisponibles(materiales = []) {
+    async cargarProductosDisponibles() {
         try {
-            // Cargar solo los productos base necesarios para los materiales
-            this.productosDisponibles = [];
-            if (materiales.length > 0) {
-                const productoBaseIds = materiales.map(m => m.producto_base_id);
+            let offset = 0;
+            const limit = 500;
+            let masProductos = true;
+            const productos = [];
+
+            while (masProductos) {
                 const response = await apiClient.get('/api/productos', {
-                    params: {
-                        producto_base_ids: productoBaseIds.join(',')
-                    }
+                    params: { offset, limit }
                 });
-                this.productosDisponibles = response.data.productos
-                    .sort((a, b) => a.codigo.localeCompare(b.codigo));
-                console.log('Productos base cargados:', this.productosDisponibles);
+                const nuevosProductos = response.data.productos;
+                productos.push(...nuevosProductos);
+                offset += limit;
+                masProductos = nuevosProductos.length === limit;
             }
+
+            this.productosDisponibles = productos
+                .sort((a, b) => a.codigo.localeCompare(b.codigo));
+            console.log('Productos disponibles cargados:', this.productosDisponibles);
         } catch (error) {
             console.error('Error al cargar productos disponibles:', error);
             if (error.response && error.response.status === 401) {
                 alert('Sesión expirada. Por favor, inicia sesión nuevamente.');
                 this.$router.push('/login');
             } else {
-                alert('No se pudieron cargar los productos disponibles. Algunos materiales podrían no mostrarse correctamente.');
+                alert('No se pudieron cargar todos los productos disponibles. Algunos materiales podrían no mostrarse correctamente.');
             }
         }
     },
-    async cargarMasProductos(search = '') {
-        try {
-            const response = await apiClient.get('/api/productos', {
-                params: {
-                    search_codigo: search,
-                    search_nombre: search,
-                    limit: 500,
-                    offset: this.productosDisponibles.length
-                }
-            });
-            const nuevosProductos = response.data.productos;
-            this.productosDisponibles = [
-                ...this.productosDisponibles,
-                ...nuevosProductos
-            ].sort((a, b) => a.codigo.localeCompare(b.codigo));
-            console.log('Productos adicionales cargados:', nuevosProductos);
-        } catch (error) {
-            console.error('Error al cargar más productos:', error);
-            alert('No se pudieron cargar más productos.');
-        }
-    },
+    
     actualizarPesoProductoCompuesto() {
         this.pesoTotalCalculado = this.materiales.reduce((total, material) => total + Number(material.peso_total), 0).toFixed(2);
         this.producto.peso_total_gr = this.pesoTotalCalculado;
@@ -673,8 +658,8 @@ methods: {
     editarProducto(producto) {
         this.modoEdicion = true;
         this.producto = { ...producto };
-        this.cargarMaterialesProducto().then(() => {
-            this.cargarProductosDisponibles(this.materiales);
+        this.cargarProductosDisponibles().then(() => {
+            this.cargarMaterialesProducto();
         });
     },
     async actualizarProducto() {
