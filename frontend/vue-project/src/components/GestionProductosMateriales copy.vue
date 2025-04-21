@@ -169,19 +169,35 @@
         </tr>
         </thead>
         <tbody>
-            <tr v-for="(material, index) in materiales" :key="material.id">
+            <tr v-for="(material, index) in materiales" :key="index">
                 <td>
-                    <input type="text" v-model="material.nombreDigitado" placeholder="Buscar por nombre" @input="sincronizarPorNombre(index)" />
+                    <!-- Nuevo campo de búsqueda por nombre -->
+                    <input 
+                        type="text" 
+                        v-model="material.nombreDigitado" 
+                        placeholder="Buscar por nombre" 
+                        @input="sincronizarPorNombre(index)" 
+                    />
+
+                    <!-- Selector de producto base -->
                     <select v-model="material.producto_base" @change="sincronizarCodigo(index)">
                         <option :value="null" disabled>Seleccione un producto</option>
                         <option v-for="prod in productosDisponibles" :key="prod.id" :value="prod.id">
                             {{ prod.codigo }} - {{ prod.nombre }}
                         </option>
                     </select>
-                    <input type="text" v-model="material.codigoDigitado" placeholder="Ingrese código del material" @input="sincronizarSelector(index)" />
+
+                    <!-- Campo de entrada de código sincronizado -->
+                    <input 
+                        type="text" 
+                        v-model="material.codigoDigitado" 
+                        placeholder="Ingrese código del material" 
+                        @input="sincronizarSelector(index)" 
+                    />
                 </td>
                 <td>
-                    <input v-model.number="material.cantidad" type="number" step="0.01" min="0.01" required @input="actualizarPesoMaterial(index)" />
+                    <input v-model.number="material.cantidad" type="number" step="0.01" min="0.01" required
+                        @input="actualizarPesoMaterial(index)" />
                 </td>
                 <td>{{ material.peso_unitario }}</td>
                 <td>{{ material.peso_total }}</td>
@@ -358,21 +374,18 @@ methods: {
 
         try {
             const response = await apiClient.get(`/api/materiales-producto/${this.producto.id}`);
-            console.log('Materiales recibidos del endpoint:', response.data.materiales); // Log 1: Ver respuesta cruda
-            this.materiales = response.data.materiales.map((material, index) => {
+            this.materiales = response.data.materiales.map(material => {
                 const productoBase = this.productosDisponibles.find(p => p.id === material.producto_base_id);
-                console.log(`Material ${index + 1}:`, material, 'Producto base:', productoBase); // Log 2: Ver cada material
                 return {
                     id: material.id,
                     producto_base: material.producto_base_id,
-                    nombreDigitado: productoBase ? productoBase.nombre : '', // Para el input de nombre
-                    codigoDigitado: productoBase ? productoBase.codigo : '', // Para el input de código
+                    codigo_nombre: productoBase ? `${productoBase.codigo} - ${productoBase.nombre}` : "",
                     cantidad: material.cantidad,
-                    peso_unitario: productoBase ? productoBase.peso_unidad_gr : material.peso_unitario, // Usar peso del endpoint si no hay productoBase
-                    peso_total: material.cantidad * (productoBase ? productoBase.peso_unidad_gr : material.peso_unitario)
+                    peso_unitario: productoBase ? productoBase.peso_unidad_gr : 0,
+                    peso_total: material.cantidad * (productoBase ? productoBase.peso_unidad_gr : 0)
                 };
             });
-            console.log('Materiales asignados a this.materiales:', this.materiales); // Log 3: Ver array final
+
             this.actualizarPesoProductoCompuesto();
         } catch (error) {
             console.error("Error al cargar materiales del producto:", error);
@@ -382,16 +395,16 @@ methods: {
     async cargarProductosDisponibles() {
         try {
             const response = await apiClient.get('/api/productos', { 
-                params: { limit: 10000 } // Aumentar límite
+                params: { limit: 500 } // Sin filtro por es_producto_compuesto
             });
             this.productosDisponibles = response.data.productos
                 .sort((a, b) => a.codigo.localeCompare(b.codigo));
-            console.log("Productos disponibles cargados:", this.productosDisponibles);
+            console.log("Productos disponibles cargados:", this.productosDisponibles); // Para depurar
         } catch (error) {
             console.error("Error al cargar productos disponibles:", error);
             if (error.response && error.response.status === 401) {
                 alert("Sesión expirada. Por favor, inicia sesión nuevamente.");
-                this.$router.push('/login');
+                this.$router.push('/login'); // Redirigir al login si el token falla
             } else {
                 alert("No se pudieron cargar los productos disponibles.");
             }
