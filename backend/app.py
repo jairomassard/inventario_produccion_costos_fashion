@@ -629,7 +629,8 @@ def create_app():
             query = query.filter(Producto.nombre.ilike(f'%{search_nombre}%'))
         if producto_base_ids:
             ids = [int(id) for id in producto_base_ids.split(',') if id.isdigit()]
-            query = query.filter(Producto.id.in_(ids))
+            if ids:
+                query = query.filter(Producto.id.in_(ids))
 
         # Total de productos (sin paginación)
         total = query.count()
