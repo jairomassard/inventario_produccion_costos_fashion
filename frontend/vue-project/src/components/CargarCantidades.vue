@@ -1,3 +1,4 @@
+```vue
 <template>
   <div class="cargar-cantidades">
     <h1>Compra de Productos</h1>
@@ -147,7 +148,7 @@ export default {
       resultadosFacturas: [],
       detalleFactura: [],
       facturaSeleccionada: "",
-      isLoading: false, // Estado para controlar el spinner
+      isLoading: false,
     };
   },
   methods: {
@@ -160,8 +161,8 @@ export default {
         return;
       }
 
-      this.isLoading = true; // Activar spinner
-      this.errores = []; // Limpiar errores previos
+      this.isLoading = true;
+      this.errores = [];
 
       const formData = new FormData();
       formData.append("file", this.archivoCsv);
@@ -182,7 +183,7 @@ export default {
           alert("Ocurrió un error al cargar las cantidades");
         }
       } finally {
-        this.isLoading = false; // Desactivar spinner
+        this.isLoading = false;
       }
     },
     descargarPlantilla() {
@@ -238,6 +239,7 @@ export default {
           fecha_fin: this.fechaFin || undefined,
         };
         const response = await apiClient.get("/api/consultar_facturas", { params });
+        console.log("Respuesta de /api/consultar_facturas:", response.data);
         this.resultadosFacturas = response.data;
         this.detalleFactura = [];
       } catch (error) {
@@ -246,18 +248,18 @@ export default {
       }
     },
     async verDetalleFactura(factura) {
+      try {
         console.log("Factura enviada a /api/detalle_factura:", factura);
-        try {
-            this.facturaSeleccionada = factura;
-            const response = await apiClient.get("/api/detalle_factura", {
-                params: { factura: factura }
-            });
-            console.log("Respuesta de /api/detalle_factura:", response.data);
-            this.detalleFactura = response.data;
-        } catch (error) {
-            console.error("Error al obtener detalle de la factura:", error);
-            alert("No se pudo recuperar el detalle de la factura.");
-        }
+        this.facturaSeleccionada = factura;
+        const response = await apiClient.get("/api/detalle_factura", {
+          params: { factura: factura }
+        });
+        console.log("Respuesta de /api/detalle_factura:", response.data);
+        this.detalleFactura = response.data;
+      } catch (error) {
+        console.error("Error al obtener detalle de la factura:", error);
+        alert("No se pudo recuperar el detalle de la factura.");
+      }
     },
     exportarListadoExcel() {
       if (!this.resultadosFacturas.length) {

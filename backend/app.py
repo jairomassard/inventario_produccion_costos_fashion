@@ -1764,37 +1764,29 @@ def create_app():
             fecha_inicio = request.args.get('fecha_inicio')
             fecha_fin = request.args.get('fecha_fin')
 
-            # Consulta basada en RegistroMovimientos
-            query = RegistroMovimientos.query.filter(
-                RegistroMovimientos.tipo_movimiento == 'ENTRADA',
-                RegistroMovimientos.descripcion.like('%Factura de compra%')
+            query = db.session.query(
+                InventarioBodega.factura,
+                db.func.min(InventarioBodega.fecha_ingreso).label('fecha')
+            ).filter(
+                InventarioBodega.factura.isnot(None)
             )
 
             if factura:
-                query = query.filter(RegistroMovimientos.descripcion.like(f'%{factura}%'))  # Case-sensitive
+                query = query.filter(InventarioBodega.factura.ilike(f'%{factura}%'))
             if fecha_inicio:
-                query = query.filter(RegistroMovimientos.fecha >= fecha_inicio)
+                query = query.filter(InventarioBodega.fecha_ingreso >= fecha_inicio)
             if fecha_fin:
-                query = query.filter(RegistroMovimientos.fecha <= fecha_fin)
+                query = query.filter(InventarioBodega.fecha_ingreso <= fecha_fin)
 
-            # Agrupar por factura extraída de la descripción
-            resultados = query.with_entities(
-                RegistroMovimientos.descripcion,
-                db.func.min(RegistroMovimientos.fecha).label('fecha')
-            ).group_by(RegistroMovimientos.descripcion).order_by(db.func.min(RegistroMovimientos.fecha)).all()
+            resultados = query.group_by(InventarioBodega.factura).order_by(db.func.min(InventarioBodega.fecha_ingreso)).all()
 
             if not resultados:
                 return jsonify([])
 
-            # Procesar resultados y filtrar notas de crédito
             response = []
             seen_facturas = set()
             for item in resultados:
-                try:
-                    factura_num = item.descripcion.split("Factura de compra ")[-1].strip()  # Mantener formato original
-                except IndexError:
-                    continue
-
+                factura_num = item.factura.strip()
                 if factura_num.startswith('NC') or factura_num in seen_facturas:
                     continue
 
@@ -1810,6 +1802,7 @@ def create_app():
             return jsonify({'error': 'Error al consultar facturas'}), 500
 
 
+
     @app.route('/api/detalle_factura', methods=['GET'])
     def detalle_factura():
         try:
@@ -1817,30 +1810,33 @@ def create_app():
             if not factura:
                 return jsonify({'error': 'Se requiere el número de factura'}), 400
 
+            # Limpiar factura si contiene prefijo
+            factura_clean = factura.replace('factura de compra ', '').strip()
+
             query = db.session.query(
-                Producto.codigo,
-                Producto.nombre,
+                Productos.codigo,
+                Productos.nombre,
                 RegistroMovimientos.cantidad,
-                Bodega.nombre.label('bodega'),
-                RegistroMovimientos.costo_unitario,  # Cambiar a RegistroMovimientos
-                RegistroMovimientos.costo_total      # Cambiar a RegistroMovimientos
+                Bodegas.nombre.label('bodega'),
+                RegistroMovimientos.costo_unitario,
+                RegistroMovimientos.costo_total
             ).join(
-                Producto, RegistroMovimientos.producto_id == Producto.id
+                Productos, RegistroMovimientos.producto_id == Productos.id
             ).join(
-                Bodega, RegistroMovimientos.bodega_destino_id == Bodega.id
+                Bodegas, RegistroMovimientos.bodega_destino_id == Bodegas.id
             ).join(
                 InventarioBodega,
                 (RegistroMovimientos.producto_id == InventarioBodega.producto_id) &
                 (RegistroMovimientos.bodega_destino_id == InventarioBodega.bodega_id) &
-                (RegistroMovimientos.fecha == InventarioBodega.fecha_ingreso)
+                (db.func.date(RegistroMovimientos.fecha) == db.func.date(InventarioBodega.fecha_ingreso))
             ).filter(
                 RegistroMovimientos.tipo_movimiento == 'ENTRADA',
-                InventarioBodega.factura == factura
+                InventarioBodega.factura == factura_clean
             ).order_by(
-                Producto.codigo,
-                Bodega.nombre,
-                RegistroMovimientos.fecha.desc()  # Usar fecha de RegistroMovimientos
-            ).distinct(Producto.codigo, Bodega.nombre)
+                Productos.codigo,
+                Bodegas.nombre,
+                RegistroMovimientos.fecha.desc()
+            ).distinct(Productos.codigo, Bodegas.nombre)
 
             resultados = query.all()
 
@@ -1862,8 +1858,8 @@ def create_app():
             return jsonify(response)
         except Exception as e:
             print(f"Error al obtener detalle de factura: {str(e)}")
-            return jsonify({'error': 'Error al obtener detalle de factura'}), 500
-        
+            return jsonify({'error': f'Error al obtener detalle de factura: {str(e)}'}), 500
+    
 
     @app.route('/api/inventario/<string:codigo_producto>', methods=['GET'])
     def consultar_inventario_por_producto(codigo_producto):
