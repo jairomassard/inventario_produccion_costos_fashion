@@ -3,8 +3,8 @@
     <h1>Cargar Ventas</h1>
 
     <section class="menu-buttons">
-      <button @click="volverAlMenu" class="btn btn-secondary" :disabled="isLoading">Volver al Menú Principal</button>
-      <button @click="limpiarPagina" class="btn btn-warning" :disabled="isLoading">Limpiar Página</button>
+      <button @click="volverAlMenu" class="btn btn-secondary">Volver al Menú Principal</button>
+      <button @click="limpiarPagina" class="btn btn-warning">Limpiar Página</button>
     </section>
 
     <!-- Subida de Archivo CSV -->
@@ -12,15 +12,9 @@
       <h2>Subir Archivo CSV</h2>
       <div>
         <label for="inputCsv">Archivo CSV:</label>
-        <input id="inputCsv" type="file" @change="cargarCsv" class="form-control" :disabled="isLoading" />
+        <input id="inputCsv" type="file" @change="cargarCsv" class="form-control" />
       </div>
-      <button @click="procesarCsv" :disabled="isLoading" class="btn btn-primary">
-        {{ isLoading ? 'Procesando...' : 'Cargar Ventas' }}
-      </button>
-      <div v-if="isLoading" class="spinner">
-        <div class="spinner-icon"></div>
-        <p>Procesando archivo, por favor espera...</p>
-      </div>
+      <button @click="procesarCsv">Cargar Ventas</button>
     </section>
 
     <!-- Mostrar errores -->
@@ -34,7 +28,7 @@
     <!-- Descarga de Plantilla -->
     <section>
       <h2>Descargar Plantilla</h2>
-      <button @click="descargarPlantilla" :disabled="isLoading" class="btn btn-primary">Descargar</button>
+      <button @click="descargarPlantilla">Descargar</button>
     </section>
 
     <!-- Consulta de Facturas de Venta -->
@@ -47,41 +41,38 @@
           id="filtroFactura"
           placeholder="Ingrese número de factura"
           class="form-control"
-          :disabled="isLoading"
         />
       </div>
       <div>
         <label for="fechaInicio">Fecha Inicio:</label>
-        <input type="date" v-model="fechaInicio" id="fechaInicio" class="form-control" :disabled="isLoading" />
+        <input type="date" v-model="fechaInicio" id="fechaInicio" class="form-control" />
       </div>
       <div>
         <label for="fechaFin">Fecha Fin:</label>
-        <input type="date" v-model="fechaFin" id="fechaFin" class="form-control" :disabled="isLoading" />
+        <input type="date" v-model="fechaFin" id="fechaFin" class="form-control" />
       </div>
       <div>
         <label for="filtroBodega">Bodega de Venta:</label>
-        <select v-model="filtroBodega" id="filtroBodega" class="form-control" :disabled="isLoading">
+        <select v-model="filtroBodega" id="filtroBodega" class="form-control">
           <option value="" disabled>Seleccione una bodega</option>
           <option v-for="bodega in bodegas" :key="bodega.id" :value="bodega.id">{{ bodega.nombre }}</option>
         </select>
       </div>
       <div>
         <label for="selectorFactura">Seleccionar Factura:</label>
-        <select v-model="filtroFactura" id="selectorFactura" class="form-control" :disabled="isLoading">
+        <select v-model="filtroFactura" id="selectorFactura" class="form-control">
           <option value="" disabled>Seleccione una factura</option>
           <option v-for="factura in facturas" :key="factura" :value="factura">{{ factura }}</option>
         </select>
       </div>
-      <button @click="consultarVentas" :disabled="isLoading" class="btn btn-primary">Consultar Facturas</button>
+      <button @click="consultarVentas">Consultar Facturas</button>
     </section>
 
     <!-- Resultados de la Consulta -->
     <section v-if="resultadosVentas.length" class="resultados-ventas">
       <h3>Resultados de la Consulta</h3>
       <div>
-        <button @click="exportarListadoExcel" class="btn btn-primary" :disabled="isLoading">
-          Exportar Listado <i class="fas fa-file-excel excel-icon"></i>
-        </button>
+        <button @click="exportarListadoExcel" class="btn btn-primary">Exportar Listado <i class="fas fa-file-excel excel-icon"></i></button>
       </div>
       <table>
         <thead>
@@ -96,7 +87,7 @@
             <td>{{ venta.factura }}</td>
             <td>{{ venta.fecha }}</td>
             <td>
-              <button @click="verDetalleVenta(venta.factura)" class="btn btn-info" :disabled="isLoading">Detalle</button>
+              <button @click="verDetalleVenta(venta.factura)" class="btn btn-info">Detalle</button>
             </td>
           </tr>
         </tbody>
@@ -107,9 +98,7 @@
     <section v-if="detalleVenta.length" class="detalle-venta">
       <h3>Detalle de la Factura de Venta {{ facturaSeleccionada }}</h3>
       <div>
-        <button @click="exportarDetalleExcel" class="btn btn-primary" :disabled="isLoading">
-          Exportar <i class="fas fa-file-excel excel-icon"></i>
-        </button>
+        <button @click="exportarDetalleExcel" class="btn btn-primary">Exportar <i class="fas fa-file-excel excel-icon"></i></button>
       </div>
       <table>
         <thead>
@@ -132,8 +121,11 @@
         </tbody>
       </table>
     </section>
+
+    
   </div>
 </template>
+
 
 <script>
 import apiClient from "../services/axios";
@@ -154,7 +146,6 @@ export default {
       resultadosVentas: [],
       detalleVenta: [],
       facturaSeleccionada: "",
-      isLoading: false, // Controla el estado de carga
     };
   },
   methods: {
@@ -167,9 +158,6 @@ export default {
         return;
       }
 
-      this.isLoading = true; // Activar spinner
-      this.errores = [];
-
       const formData = new FormData();
       formData.append("file", this.archivoCsv);
 
@@ -180,16 +168,15 @@ export default {
           },
         });
         alert(response.data.message);
+        this.errores = [];
         this.cargarFacturas();
       } catch (error) {
         console.error("Error al cargar ventas:", error);
         if (error.response && error.response.data.errors) {
-          this.errores = error.response.data.errors;
+          this.errores = error.response.data.errors; // Asigna los errores al array para mostrarlos en el template
         } else {
           this.errores = ["Ocurrió un error al cargar las ventas sin detalles específicos"];
         }
-      } finally {
-        this.isLoading = false; // Desactivar spinner
       }
     },
     descargarPlantilla() {
@@ -228,7 +215,6 @@ export default {
       this.resultadosVentas = [];
       this.detalleVenta = [];
       this.facturaSeleccionada = "";
-      this.isLoading = false;
     },
     async cargarFacturas() {
       try {
@@ -332,6 +318,7 @@ export default {
       XLSX.utils.book_append_sheet(workbook, worksheet, "Detalle Factura");
       XLSX.writeFile(workbook, `detalle_factura_${this.facturaSeleccionada}.xlsx`);
     },
+
   },
   mounted() {
     this.cargarFacturas();
@@ -354,40 +341,18 @@ export default {
   margin-left: 5px;
   color: #fff;
 }
-/* Spinner */
-.spinner {
-  display: flex;
-  align-items: center;
-  margin-top: 10px;
-}
-.spinner-icon {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #007bff;
-  border-radius: 50%;
-  width: 24px;
-  height: 24px;
-  animation: spin 1s linear infinite;
-  margin-right: 10px;
-}
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-.spinner p {
-  margin: 0;
-  color: #555;
-  font-size: 14px;
-}
 /* Títulos */
 h1 {
   text-align: center;
   color: #333;
   margin-bottom: 20px;
 }
+
 h2, h3 {
   color: #0056b3;
   margin-bottom: 15px;
 }
+
 /* Botones */
 button {
   padding: 0.6rem 1.2rem;
@@ -400,40 +365,46 @@ button {
   margin-right: 10px;
   transition: background-color 0.3s ease, transform 0.2s ease;
 }
-button:disabled {
-  background-color: #6c757d;
-  cursor: not-allowed;
-}
-button:hover:not(:disabled) {
+
+button:hover {
   background-color: #0056b3;
   transform: translateY(-2px);
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
 }
+
 .btn-secondary {
   background-color: #007bff;
 }
-.btn-secondary:hover:not(:disabled) {
+
+.btn-secondary:hover {
   background-color: #0056b3;
 }
+
 .btn-warning {
   background-color: #ffc107;
   color: #333;
 }
-.btn-warning:hover:not(:disabled) {
+
+.btn-warning:hover {
   background-color: #e0a800;
 }
+
 .btn-info {
   background-color: #007bff;
 }
-.btn-info:hover:not(:disabled) {
+
+.btn-info:hover {
   background-color: #0056b3;
 }
+
 .btn-primary {
   background-color: #007bff;
 }
-.btn-primary:hover:not(:disabled) {
+
+.btn-primary:hover {
   background-color: #0056b3;
 }
+
 /* Formularios */
 label {
   font-weight: bold;
@@ -441,6 +412,7 @@ label {
   margin-bottom: 5px;
   color: #555;
 }
+
 input, select {
   width: 100%;
   padding: 10px;
@@ -453,15 +425,13 @@ input, select {
   color: #333;
   transition: border-color 0.3s ease-in-out;
 }
-input:disabled, select:disabled {
-  background-color: #e9ecef;
-  cursor: not-allowed;
-}
+
 input:focus, select:focus {
   border-color: #007bff;
   outline: none;
   box-shadow: 0 0 4px rgba(0, 123, 255, 0.25);
 }
+
 /* Tablas */
 table {
   width: 100%;
@@ -469,22 +439,27 @@ table {
   margin-top: 20px;
   font-size: 14px;
 }
+
 th, td {
   border: 1px solid #ddd;
   padding: 10px;
   text-align: left;
 }
+
 th {
   background-color: #f8f9fa;
   color: #333;
   font-weight: bold;
 }
+
 tbody tr:nth-child(odd) {
   background-color: #f9f9f9;
 }
+
 tbody tr:hover {
   background-color: #f1f1f1;
 }
+
 /* Secciones */
 section {
   margin-bottom: 30px;
@@ -493,48 +468,59 @@ section {
   border-radius: 6px;
   background-color: #f8f9fa;
 }
+
 /* Menu buttons */
 .menu-buttons {
   margin-bottom: 15px;
 }
+
 /* Botones de exportación */
 section div {
   margin-bottom: 10px;
 }
+
 /* Errores */
 ul {
   margin-top: 10px;
   padding-left: 20px;
 }
+
 li {
   color: #555;
   font-size: 14px;
 }
+
 /* Responsividad */
 @media (max-width: 768px) {
   .cargar-ventas {
     margin: 10px auto;
     padding: 10px;
   }
+
   input, select, button {
     width: 100%;
     margin-bottom: 10px;
     font-size: 16px;
   }
+
   table {
     display: block;
     overflow-x: auto;
     white-space: nowrap;
   }
+
   th, td {
     font-size: 12px;
     padding: 8px;
   }
+
   h1 {
     font-size: 20px;
   }
+
   h2, h3 {
     font-size: 18px;
   }
+
 }
 </style>
