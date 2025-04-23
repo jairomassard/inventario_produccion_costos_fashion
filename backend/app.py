@@ -1863,7 +1863,7 @@ def create_app():
         except Exception as e:
             print(f"Error al obtener detalle de factura: {str(e)}")
             return jsonify({'error': 'Error al obtener detalle de factura'}), 500
-
+        
 
     @app.route('/api/inventario/<string:codigo_producto>', methods=['GET'])
     def consultar_inventario_por_producto(codigo_producto):
