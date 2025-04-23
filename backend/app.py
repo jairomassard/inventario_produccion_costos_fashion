@@ -4746,7 +4746,7 @@ def create_app():
 
                 peso_x_paquete = float(material.cantidad * material.peso_unitario) if material.peso_unitario is not None else 0.0
                 cantidad_total = float(material.cantidad) * orden.cantidad_paquetes
-                peso_total = cantidad_total * peso_x_paquete
+                peso_total = float(material.cantidad * material.peso_unitario * orden.cantidad_paquetes)
                 costo_total = cantidad_total * costo_unitario
 
                 y = draw_wrapped_text(pdf, 50, y, f"{producto_base.codigo} - {producto_base.nombre}", 200)
