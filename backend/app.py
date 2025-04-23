@@ -2716,10 +2716,8 @@ def create_app():
                         select(
                             func.sum(
                                 case(
-                                    [
-                                        (Kardex.tipo_movimiento == 'ENTRADA', Kardex.cantidad),
-                                        (Kardex.tipo_movimiento == 'SALIDA', -Kardex.cantidad)
-                                    ],
+                                    (Kardex.tipo_movimiento == 'ENTRADA', Kardex.cantidad),
+                                    (Kardex.tipo_movimiento == 'SALIDA', -Kardex.cantidad),
                                     else_=0
                                 )
                             ).label('saldo')
@@ -2884,7 +2882,7 @@ def create_app():
             db.session.rollback()
             logger.error(f"Error al guardar en la base de datos: {str(e)}")
             return jsonify({'message': 'Error al guardar los datos', 'errors': [str(e)]}), 500
-
+    
 
     @app.route('/api/ventas_facturas', methods=['GET'])
     def listar_ventas_facturas():
