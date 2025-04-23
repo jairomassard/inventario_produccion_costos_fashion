@@ -1814,16 +1814,16 @@ def create_app():
             factura_clean = factura.replace('factura de compra ', '').strip()
 
             query = db.session.query(
-                Productos.codigo,
-                Productos.nombre,
+                Producto.codigo,
+                Producto.nombre,
                 RegistroMovimientos.cantidad,
-                Bodegas.nombre.label('bodega'),
+                Bodega.nombre.label('bodega'),
                 RegistroMovimientos.costo_unitario,
                 RegistroMovimientos.costo_total
             ).join(
-                Productos, RegistroMovimientos.producto_id == Productos.id
+                Producto, RegistroMovimientos.producto_id == Producto.id
             ).join(
-                Bodegas, RegistroMovimientos.bodega_destino_id == Bodegas.id
+                Bodega, RegistroMovimientos.bodega_destino_id == Bodega.id
             ).join(
                 InventarioBodega,
                 (RegistroMovimientos.producto_id == InventarioBodega.producto_id) &
@@ -1833,10 +1833,10 @@ def create_app():
                 RegistroMovimientos.tipo_movimiento == 'ENTRADA',
                 InventarioBodega.factura == factura_clean
             ).order_by(
-                Productos.codigo,
-                Bodegas.nombre,
+                Producto.codigo,
+                Bodega.nombre,
                 RegistroMovimientos.fecha.desc()
-            ).distinct(Productos.codigo, Bodegas.nombre)
+            ).distinct(Producto.codigo, Bodega.nombre)
 
             resultados = query.all()
 
