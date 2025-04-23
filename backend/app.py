@@ -1328,13 +1328,13 @@ def create_app():
                 break
 
             try:
-                factura = row.get('factura', '').lower().strip()  # Normalizar a minúsculas
+                factura = row.get('factura', '').strip()  # Preservar case-sensitivity
                 if not factura:
                     errores.append(f"Fila {index}: El número de factura es obligatorio y no puede estar vacío.")
                     continue
 
                 # Validar factura duplicada (case-insensitive)
-                if factura in facturas_existentes:
+                if factura.lower() in facturas_existentes:
                     errores.append(f"Fila {index}: La factura {factura} ya existe. No se pueden cargar más productos con este número de factura.")
                     continue
 
@@ -1352,7 +1352,7 @@ def create_app():
                 if fecha_ingreso:
                     fecha_ingreso = datetime.strptime(fecha_ingreso, '%Y-%m-%d %H:%M:%S')
                 else:
-                    fecha_ingreso = obtener_hora_colombia()
+                    fecha_ingreso = obtener_hora_colombia()  # Usar hora actual si no se proporciona
 
                 # Validar producto y bodega
                 producto = productos.get(codigo)
@@ -1365,7 +1365,7 @@ def create_app():
                     errores.append(f"Fila {index}: Bodega con nombre {bodega} no encontrada.")
                     continue
 
-                facturas_existentes.add(factura)  # Marcar factura como procesada para este lote
+                facturas_existentes.add(factura.lower())  # Marcar factura como procesada (case-insensitive)
 
                 # Determinar descripción
                 inventario_previo = InventarioBodega.query.filter_by(producto_id=producto.id).first()
@@ -1378,7 +1378,7 @@ def create_app():
                         producto_id=producto.id,
                         bodega_id=bodega_obj.id,
                         cantidad=cantidad,
-                        factura=factura,  # Almacenar en minúsculas
+                        factura=factura,  # Usar factura con case original
                         contenedor=contenedor,
                         fecha_ingreso=fecha_ingreso,
                         costo_unitario=costo_unitario,
@@ -1390,7 +1390,7 @@ def create_app():
                     inventario.cantidad += cantidad
                     inventario.costo_unitario = costo_total_nuevo / inventario.cantidad if inventario.cantidad > 0 else costo_unitario
                     inventario.costo_total = inventario.cantidad * inventario.costo_unitario
-                    inventario.factura = factura  # Actualizar a minúsculas
+                    inventario.factura = factura  # Usar factura con case original
                     inventario.contenedor = contenedor
                     inventario.fecha_ingreso = fecha_ingreso
 
@@ -1472,7 +1472,6 @@ def create_app():
             db.session.rollback()
             logger.error(f"Error al guardar en la base de datos: {str(e)}")
             return jsonify({'message': 'Error al guardar los datos', 'errors': [str(e)]}), 500
-
 
     @app.route('/api/cargar_notas_credito', methods=['POST'])
     def cargar_notas_credito():
