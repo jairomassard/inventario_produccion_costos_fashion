@@ -23,6 +23,12 @@
         <p>Procesando archivo, por favor espera...</p>
       </div>
     </section>
+    <section v-if="errores.length">
+      <h2>Errores detectados:</h2>
+      <ul>
+        <li v-for="(error, index) in errores" :key="index">{{ error }}</li>
+      </ul>
+    </section>
 
     <!-- Descarga de Plantilla -->
     <section>
