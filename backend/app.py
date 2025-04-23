@@ -4742,12 +4742,12 @@ def create_app():
                     Kardex.producto_id == material.producto_base_id,
                     Kardex.bodega_destino_id == orden.bodega_produccion_id
                 ).order_by(Kardex.fecha.desc()).first()
-                costo_unitario = ultimo_kardex.saldo_costo_unitario if ultimo_kardex else 0.0
+                costo_unitario = float(ultimo_kardex.saldo_costo_unitario) if ultimo_kardex else 0.0
 
-                peso_x_paquete = material.peso_unitario if material.peso_unitario is not None else (
-                    producto_base.peso_unitario if producto_base and producto_base.peso_unitario is not None else 0
+                peso_x_paquete = float(material.peso_unitario) if material.peso_unitario is not None else (
+                    float(producto_base.peso_unidad_gr) if producto_base and producto_base.peso_unidad_gr is not None else 0.0
                 )
-                cantidad_total = material.cantidad * orden.cantidad_paquetes
+                cantidad_total = float(material.cantidad) * orden.cantidad_paquetes  # Convertir a float
                 peso_total = cantidad_total * peso_x_paquete
                 costo_total = cantidad_total * costo_unitario
 
