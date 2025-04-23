@@ -246,16 +246,18 @@ export default {
       }
     },
     async verDetalleFactura(factura) {
-      try {
-        this.facturaSeleccionada = factura;
-        const response = await apiClient.get("/api/detalle_factura", {
-          params: { factura: factura }
-        });
-        this.detalleFactura = response.data;
-      } catch (error) {
-        console.error("Error al obtener detalle de la factura:", error);
-        alert("No se pudo recuperar el detalle de la factura.");
-      }
+        console.log("Factura enviada a /api/detalle_factura:", factura);
+        try {
+            this.facturaSeleccionada = factura;
+            const response = await apiClient.get("/api/detalle_factura", {
+                params: { factura: factura }
+            });
+            console.log("Respuesta de /api/detalle_factura:", response.data);
+            this.detalleFactura = response.data;
+        } catch (error) {
+            console.error("Error al obtener detalle de la factura:", error);
+            alert("No se pudo recuperar el detalle de la factura.");
+        }
     },
     exportarListadoExcel() {
       if (!this.resultadosFacturas.length) {
