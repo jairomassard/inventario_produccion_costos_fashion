@@ -2665,7 +2665,7 @@ def create_app():
         }
         facturas_existentes = {f.factura.lower() for f in Venta.query.with_entities(Venta.factura).distinct().all()}
         
-        # Preconsultar último Kardex por producto y bodega (CORREGIDO para SQLAlchemy 2.x)
+        # Preconsultar último Kardex por producto y bodega
         subquery = (
             select(Kardex.producto_id, Kardex.bodega_origen_id, func.max(Kardex.id).label('max_id'))
             .group_by(Kardex.producto_id, Kardex.bodega_origen_id)
@@ -2692,6 +2692,49 @@ def create_app():
         ultimo_consecutivo = db.session.query(func.max(db.cast(RegistroMovimientos.consecutivo, db.String))).scalar() or "T00000"
         consecutivo_base = int(ultimo_consecutivo[1:]) + 1
 
+        # Identificar productos y bodegas únicos en el CSV
+        stream.seek(0)  # Reiniciar el stream para leer de nuevo
+        reader = csv.DictReader(stream)
+        producto_codigos = set()
+        bodega_nombres = set()
+        fecha_ventas = set()
+        for row in reader:
+            producto_codigos.add(row['codigo'].strip())
+            bodega_nombres.add(row['bodega'].strip())
+            fecha_ventas.add(datetime.strptime(row['fecha_venta'], '%Y-%m-%d %H:%M:%S'))
+
+        # Mapear códigos a IDs
+        producto_ids = {p.id for p in productos.values() if p.codigo in producto_codigos}
+        bodega_ids = {b.id for b in bodegas.values() if b.nombre in bodega_nombres}
+
+        # Precalcular saldos disponibles para todas las combinaciones
+        saldos = {}
+        for fecha_venta in fecha_ventas:
+            for producto_id in producto_ids:
+                for bodega_id in bodega_ids:
+                    saldo = db.session.execute(
+                        select(
+                            func.sum(
+                                case(
+                                    [
+                                        (Kardex.tipo_movimiento == 'ENTRADA', Kardex.cantidad),
+                                        (Kardex.tipo_movimiento == 'SALIDA', -Kardex.cantidad)
+                                    ],
+                                    else_=0
+                                )
+                            ).label('saldo')
+                        ).where(
+                            Kardex.producto_id == producto_id,
+                            Kardex.fecha <= fecha_venta.replace(tzinfo=pytz.timezone('America/Bogota')),
+                            (Kardex.bodega_destino_id == bodega_id) | (Kardex.bodega_origen_id == bodega_id)
+                        )
+                    ).scalar() or 0
+                    saldos[(producto_id, bodega_id, fecha_venta)] = saldo
+
+        # Reiniciar el stream para procesar las filas
+        stream.seek(0)
+        reader = csv.DictReader(stream)
+
         errores = []
         nuevos_movimientos = []
         nuevos_kardex = []
@@ -2700,160 +2743,142 @@ def create_app():
         max_filas = 10000  # Límite para evitar sobrecarga
 
         try:
-            with db.session.begin():
-                for index, row in enumerate(reader, start=1):
-                    if filas_procesadas >= max_filas:
-                        errores.append(f"Se alcanzó el límite de {max_filas} filas. Divida el archivo en partes más pequeñas.")
-                        break
+            for index, row in enumerate(reader, start=1):
+                if filas_procesadas >= max_filas:
+                    errores.append(f"Se alcanzó el límite de {max_filas} filas. Divida el archivo en partes más pequeñas.")
+                    break
 
-                    try:
-                        factura = row['factura'].strip()
-                        if not factura:
-                            errores.append(f"Fila {index}: El número de factura es obligatorio y no puede estar vacío.")
-                            continue
-                        if not (factura.startswith('FB') or factura.startswith('CC')):
-                            errores.append(f"Fila {index}: El número de factura debe comenzar con 'FB' o 'CC'.")
-                            continue
-                        if factura.lower() in facturas_existentes:
-                            errores.append(f"Fila {index}: La factura {factura} ya existe.")
-                            continue
+                try:
+                    factura = row['factura'].strip()
+                    if not factura:
+                        errores.append(f"Fila {index}: El número de factura es obligatorio y no puede estar vacío.")
+                        continue
+                    if not (factura.startswith('FB') or factura.startswith('CC')):
+                        errores.append(f"Fila {index}: El número de factura debe comenzar con 'FB' o 'CC'.")
+                        continue
+                    if factura.lower() in facturas_existentes:
+                        errores.append(f"Fila {index}: La factura {factura} ya existe.")
+                        continue
 
-                        codigo = row['codigo'].strip()
-                        nombre = row['nombre'].strip()
-                        cantidad = int(row['cantidad'])
-                        fecha_venta = datetime.strptime(row['fecha_venta'], '%Y-%m-%d %H:%M:%S')
-                        bodega_nombre = row['bodega'].strip()
-                        precio_unitario = float(row['precio_unitario']) if has_precio_unitario and row['precio_unitario'].strip() else None
+                    codigo = row['codigo'].strip()
+                    nombre = row['nombre'].strip()
+                    cantidad = int(row['cantidad'])
+                    fecha_venta = datetime.strptime(row['fecha_venta'], '%Y-%m-%d %H:%M:%S')
+                    bodega_nombre = row['bodega'].strip()
+                    precio_unitario = float(row['precio_unitario']) if has_precio_unitario and row['precio_unitario'].strip() else None
 
-                        producto = productos.get(codigo)
-                        if not producto:
-                            errores.append(f"Fila {index}: Producto con código {codigo} no encontrado")
-                            continue
+                    producto = productos.get(codigo)
+                    if not producto:
+                        errores.append(f"Fila {index}: Producto con código {codigo} no encontrado")
+                        continue
 
-                        bodega = bodegas.get(bodega_nombre)
-                        if not bodega:
-                            errores.append(f"Fila {index}: Bodega con nombre {bodega_nombre} no encontrada")
-                            continue
+                    bodega = bodegas.get(bodega_nombre)
+                    if not bodega:
+                        errores.append(f"Fila {index}: Bodega con nombre {bodega_nombre} no encontrada")
+                        continue
 
-                        facturas_existentes.add(factura.lower())
+                    facturas_existentes.add(factura.lower())
 
-                        # Calcular saldo disponible hasta la fecha de venta
-                        saldo_query = db.session.execute(
-                            select(
-                                func.sum(
-                                    case(
-                                        [
-                                            (Kardex.tipo_movimiento == 'ENTRADA', Kardex.cantidad),
-                                            (Kardex.tipo_movimiento == 'SALIDA', -Kardex.cantidad)
-                                        ],
-                                        else_=0
-                                    )
-                                ).label('saldo')
-                            ).where(
-                                Kardex.producto_id == producto.id,
-                                Kardex.fecha <= fecha_venta.replace(tzinfo=pytz.timezone('America/Bogota')),
-                                (Kardex.bodega_destino_id == bodega.id) | (Kardex.bodega_origen_id == bodega.id)
-                            )
-                        ).scalar() or 0
+                    # Validar saldo disponible desde los saldos precalculados
+                    saldo = saldos.get((producto.id, bodega.id, fecha_venta), 0)
+                    if saldo < cantidad:
+                        errores.append(f"Fila {index}: Inventario insuficiente para el producto {codigo} en {bodega_nombre} a la fecha {fecha_venta}. Stock disponible: {saldo}")
+                        continue
 
-                        if saldo_query < cantidad:
-                            errores.append(f"Fila {index}: Inventario insuficiente para el producto {codigo} en {bodega_nombre} a la fecha {fecha_venta}. Stock disponible: {saldo_query}")
-                            continue
+                    # Obtener costo unitario desde último Kardex o EstadoInventario
+                    ultimo_kardex_entry = ultimo_kardex.get((producto.id, bodega.id))
+                    estado_inventario = estados_inventario.get((producto.id, bodega.id))
 
-                        # Obtener costo unitario desde último Kardex o EstadoInventario
-                        ultimo_kardex_entry = ultimo_kardex.get((producto.id, bodega.id))
-                        estado_inventario = estados_inventario.get((producto.id, bodega.id))
+                    if ultimo_kardex_entry:
+                        costo_unitario = ultimo_kardex_entry.saldo_costo_unitario
+                        saldo_cantidad_antes = ultimo_kardex_entry.saldo_cantidad
+                        saldo_costo_total_antes = ultimo_kardex_entry.saldo_costo_total
+                    elif estado_inventario and hasattr(estado_inventario, 'costo_unitario') and estado_inventario.costo_unitario:
+                        costo_unitario = estado_inventario.costo_unitario
+                        saldo_cantidad_antes = estado_inventario.cantidad
+                        saldo_costo_total_antes = estado_inventario.costo_total
+                    else:
+                        errores.append(f"Fila {index}: No hay costo unitario inicial para el producto {codigo} en {bodega_nombre}")
+                        continue
 
-                        if ultimo_kardex_entry:
-                            costo_unitario = ultimo_kardex_entry.saldo_costo_unitario
-                            saldo_cantidad_antes = ultimo_kardex_entry.saldo_cantidad
-                            saldo_costo_total_antes = ultimo_kardex_entry.saldo_costo_total
-                        elif estado_inventario and hasattr(estado_inventario, 'costo_unitario') and estado_inventario.costo_unitario:
-                            costo_unitario = estado_inventario.costo_unitario
-                            saldo_cantidad_antes = estado_inventario.cantidad
-                            saldo_costo_total_antes = estado_inventario.costo_total
-                        else:
-                            errores.append(f"Fila {index}: No hay costo unitario inicial para el producto {codigo} en {bodega_nombre}")
-                            continue
+                    costo_total = cantidad * costo_unitario
+                    saldo_cantidad = saldo_cantidad_antes - cantidad
+                    saldo_costo_total = saldo_costo_total_antes - costo_total
 
-                        costo_total = cantidad * costo_unitario
-                        saldo_cantidad = saldo_cantidad_antes - cantidad
-                        saldo_costo_total = saldo_costo_total_antes - costo_total
+                    # Actualizar EstadoInventario
+                    if estado_inventario:
+                        estado_inventario.cantidad -= cantidad
+                        estado_inventario.ultima_actualizacion = fecha_venta
+                        estado_inventario.costo_total = estado_inventario.cantidad * estado_inventario.costo_unitario
+                    else:
+                        errores.append(f"Fila {index}: No se encontró estado de inventario para {codigo} en {bodega_nombre}")
+                        continue
 
-                        # Actualizar EstadoInventario
-                        if estado_inventario:
-                            estado_inventario.cantidad -= cantidad
-                            estado_inventario.ultima_actualizacion = fecha_venta
-                            estado_inventario.costo_total = estado_inventario.cantidad * estado_inventario.costo_unitario
-                        else:
-                            errores.append(f"Fila {index}: No se encontró estado de inventario para {codigo} en {bodega_nombre}")
-                            continue
+                    # Generar consecutivo
+                    nuevo_consecutivo = f"T{consecutivo_base + filas_procesadas:05d}"
 
-                        # Generar consecutivo
-                        nuevo_consecutivo = f"T{consecutivo_base + filas_procesadas:05d}"
+                    # Preparar RegistroMovimientos
+                    nuevo_movimiento = RegistroMovimientos(
+                        consecutivo=nuevo_consecutivo,
+                        tipo_movimiento='SALIDA',
+                        producto_id=producto.id,
+                        bodega_origen_id=bodega.id,
+                        bodega_destino_id=None,
+                        cantidad=cantidad,
+                        fecha=fecha_venta,
+                        descripcion=f"Salida de mercancía por venta con Factura {factura} desde {bodega_nombre}",
+                        costo_unitario=costo_unitario,
+                        costo_total=costo_total
+                    )
+                    nuevos_movimientos.append(nuevo_movimiento)
 
-                        # Preparar RegistroMovimientos
-                        nuevo_movimiento = RegistroMovimientos(
-                            consecutivo=nuevo_consecutivo,
-                            tipo_movimiento='SALIDA',
-                            producto_id=producto.id,
-                            bodega_origen_id=bodega.id,
-                            bodega_destino_id=None,
-                            cantidad=cantidad,
-                            fecha=fecha_venta,
-                            descripcion=f"Salida de mercancía por venta con Factura {factura} desde {bodega_nombre}",
-                            costo_unitario=costo_unitario,
-                            costo_total=costo_total
-                        )
-                        nuevos_movimientos.append(nuevo_movimiento)
+                    # Preparar Kardex
+                    kardex_salida = Kardex(
+                        producto_id=producto.id,
+                        tipo_movimiento='SALIDA',
+                        bodega_origen_id=bodega.id,
+                        bodega_destino_id=None,
+                        cantidad=cantidad,
+                        costo_unitario=costo_unitario,
+                        costo_total=costo_total,
+                        fecha=fecha_venta.replace(tzinfo=pytz.timezone('America/Bogota')),
+                        referencia=f"Salida de mercancía por venta con Factura {factura} desde {bodega_nombre}",
+                        saldo_cantidad=saldo_cantidad,
+                        saldo_costo_unitario=costo_unitario if saldo_cantidad > 0 else 0.0,
+                        saldo_costo_total=saldo_costo_total
+                    )
+                    nuevos_kardex.append(kardex_salida)
 
-                        # Preparar Kardex
-                        kardex_salida = Kardex(
-                            producto_id=producto.id,
-                            tipo_movimiento='SALIDA',
-                            bodega_origen_id=bodega.id,
-                            bodega_destino_id=None,
-                            cantidad=cantidad,
-                            costo_unitario=costo_unitario,
-                            costo_total=costo_total,
-                            fecha=fecha_venta.replace(tzinfo=pytz.timezone('America/Bogota')),
-                            referencia=f"Salida de mercancía por venta con Factura {factura} desde {bodega_nombre}",
-                            saldo_cantidad=saldo_cantidad,
-                            saldo_costo_unitario=costo_unitario if saldo_cantidad > 0 else 0.0,
-                            saldo_costo_total=saldo_costo_total
-                        )
-                        nuevos_kardex.append(kardex_salida)
+                    # Preparar Venta
+                    venta = Venta(
+                        factura=factura,
+                        producto_id=producto.id,
+                        nombre_producto=nombre,
+                        cantidad=cantidad,
+                        fecha_venta=fecha_venta,
+                        bodega_id=bodega.id,
+                        precio_unitario=precio_unitario
+                    )
+                    nuevas_ventas.append(venta)
 
-                        # Preparar Venta
-                        venta = Venta(
-                            factura=factura,
-                            producto_id=producto.id,
-                            nombre_producto=nombre,
-                            cantidad=cantidad,
-                            fecha_venta=fecha_venta,
-                            bodega_id=bodega.id,
-                            precio_unitario=precio_unitario
-                        )
-                        nuevas_ventas.append(venta)
+                    filas_procesadas += 1
 
-                        filas_procesadas += 1
+                except Exception as e:
+                    errores.append(f"Fila {index}: Error procesando la fila ({str(e)})")
+                    logger.error(f"Fila {index}: Error procesando - {str(e)}")
 
-                    except Exception as e:
-                        errores.append(f"Fila {index}: Error procesando la fila ({str(e)})")
-                        logger.error(f"Fila {index}: Error procesando - {str(e)}")
+            if errores:
+                logger.error(f"Errores al procesar el archivo: {errores}")
+                db.session.rollback()
+                return jsonify({'message': 'Errores al procesar el archivo', 'errors': errores}), 400
 
-                if errores:
-                    logger.error(f"Errores al procesar el archivo: {errores}")
-                    db.session.rollback()
-                    return jsonify({'message': 'Errores al procesar el archivo', 'errors': errores}), 400
-
-                # Insertar en lote
-                db.session.bulk_save_objects(nuevos_movimientos)
-                db.session.bulk_save_objects(nuevos_kardex)
-                db.session.bulk_save_objects(nuevas_ventas)
-                db.session.commit()
-                logger.info("Ventas cargadas correctamente")
-                return jsonify({'message': 'Ventas cargadas correctamente'}), 201
+            # Insertar en lote y confirmar transacción
+            db.session.bulk_save_objects(nuevos_movimientos)
+            db.session.bulk_save_objects(nuevos_kardex)
+            db.session.bulk_save_objects(nuevas_ventas)
+            db.session.commit()
+            logger.info("Ventas cargadas correctamente")
+            return jsonify({'message': 'Ventas cargadas correctamente'}), 201
 
         except Exception as e:
             db.session.rollback()
