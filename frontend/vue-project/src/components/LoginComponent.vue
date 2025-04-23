@@ -73,7 +73,7 @@ export default {
           password: this.password,
         });
 
-        const { tipo_usuario, id, nombres, apellidos, token } = response.data;
+        const { tipo_usuario, id, nombres, apellidos, token, message } = response.data;
 
         if (!token) {
           this.errorMessage = 'Token no recibido. Contacta al administrador.';
@@ -87,6 +87,8 @@ export default {
         localStorage.setItem('apellidos', apellidos);
         localStorage.setItem('token', token);
         // console.log('DEBUG: Token almacenado:', token);
+
+        alert(message); // Mostrar el mensaje dinámico del backend
 
         this.$emit('loginSuccess');
 

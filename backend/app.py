@@ -24,7 +24,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
-from sqlalchemy import create_engine, func, case
+from sqlalchemy import create_engine, func, case, select
 from werkzeug.security import generate_password_hash
 from werkzeug.security import check_password_hash
 from models import (
@@ -484,11 +484,13 @@ def create_app():
 
             # Eliminar sesiones activas existentes del usuario
             sesiones_existentes = SesionActiva.query.filter_by(usuario_id=usuario.id).all()
+            message = 'Inicio de sesión exitoso'  # Mensaje por defecto
             if sesiones_existentes:
                 for sesion in sesiones_existentes:
                     db.session.delete(sesion)
                 db.session.commit()
                 logger.debug(f"{len(sesiones_existentes)} sesiones antiguas eliminadas para el usuario {usuario.usuario}")
+                message = 'Inicio de sesión exitoso. Se cerró una sesión previa en otro dispositivo.'  # Mensaje actualizado
             else:
                 logger.debug(f"No había sesiones activas previas para el usuario {usuario.usuario}")
 
@@ -501,7 +503,7 @@ def create_app():
 
             # 🔑 Generar token y crear nueva sesión activa
             token = generate_token()
-           
+            
             nueva_sesion = SesionActiva(
                 usuario_id=usuario.id,
                 token=token,
@@ -520,7 +522,7 @@ def create_app():
                 'apellidos': usuario.apellidos,
                 'tipo_usuario': usuario.tipo_usuario,
                 'token': token,
-                'message': 'Inicio de sesión exitoso'
+                'message': message  # Usar el mensaje dinámico
             }), 200
 
         except Exception as e:

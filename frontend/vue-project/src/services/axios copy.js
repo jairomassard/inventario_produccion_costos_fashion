@@ -14,9 +14,10 @@ const apiClient = axios.create({
 // Interceptor para agregar el token a cada solicitud
 apiClient.interceptors.request.use(
     (config) => {
-        const token = localStorage.getItem('token');
-        if (token && !config.url.includes('/login')) { // No enviar token a /login
-            config.headers.Authorization = `Bearer ${token}`;
+        const token = localStorage.getItem('token'); // Recuperar el token
+        if (token) {
+            // console.log(`DEBUG: Token en la solicitud: ${token}`);
+            config.headers.Authorization = `Bearer ${token}`; // Agregar token al header
         }
         return config;
     },
@@ -27,13 +28,14 @@ apiClient.interceptors.request.use(
 );
 
 apiClient.interceptors.response.use(
-    (response) => response,
+    (response) => response, // Devuelve la respuesta directamente si no hay errores
     (error) => {
         console.error("Error en la respuesta de Axios:", error.response);
-        if (error.response?.status === 401 && !error.config.url.includes('/login')) {
+
+        if (error.response?.status === 401) {
             console.error('Error 401: No autorizado o sesión expirada.');
-            localStorage.removeItem('token');
-            window.location.href = '/login';
+            localStorage.removeItem('token'); // Limpia el token si hay error 401
+            window.location.href = '/login'; // Redirige al usuario al login
         } else if (error.response?.status === 403) {
             console.error('Error 403: Acceso prohibido.');
             alert('No tienes permisos para realizar esta acción.');
@@ -44,6 +46,7 @@ apiClient.interceptors.response.use(
             console.error('Error 400: Solicitud incorrecta.', error.response.data);
             alert(error.response?.data?.error || "Error en la solicitud. Verifica los datos enviados.");
         }
+
         return Promise.reject(error);
     }
 );

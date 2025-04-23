@@ -354,30 +354,6 @@ export default {
   margin-left: 5px;
   color: #fff;
 }
-/* Spinner */
-.spinner {
-  display: flex;
-  align-items: center;
-  margin-top: 10px;
-}
-.spinner-icon {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #007bff;
-  border-radius: 50%;
-  width: 24px;
-  height: 24px;
-  animation: spin 1s linear infinite;
-  margin-right: 10px;
-}
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-.spinner p {
-  margin: 0;
-  color: #555;
-  font-size: 14px;
-}
 /* Títulos */
 h1 {
   text-align: center;
@@ -400,11 +376,7 @@ button {
   margin-right: 10px;
   transition: background-color 0.3s ease, transform 0.2s ease;
 }
-button:disabled {
-  background-color: #6c757d;
-  cursor: not-allowed;
-}
-button:hover:not(:disabled) {
+button:hover {
   background-color: #0056b3;
   transform: translateY(-2px);
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
@@ -412,26 +384,26 @@ button:hover:not(:disabled) {
 .btn-secondary {
   background-color: #007bff;
 }
-.btn-secondary:hover:not(:disabled) {
+.btn-secondary:hover {
   background-color: #0056b3;
 }
 .btn-warning {
   background-color: #ffc107;
   color: #333;
 }
-.btn-warning:hover:not(:disabled) {
+.btn-warning:hover {
   background-color: #e0a800;
 }
 .btn-info {
   background-color: #007bff;
 }
-.btn-info:hover:not(:disabled) {
+.btn-info:hover {
   background-color: #0056b3;
 }
 .btn-primary {
   background-color: #007bff;
 }
-.btn-primary:hover:not(:disabled) {
+.btn-primary:hover {
   background-color: #0056b3;
 }
 /* Formularios */
@@ -453,14 +425,33 @@ input, select {
   color: #333;
   transition: border-color 0.3s ease-in-out;
 }
-input:disabled, select:disabled {
-  background-color: #e9ecef;
-  cursor: not-allowed;
-}
 input:focus, select:focus {
   border-color: #007bff;
   outline: none;
   box-shadow: 0 0 4px rgba(0, 123, 255, 0.25);
+}
+/* Spinner */
+.spinner {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+}
+.spinner-icon {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #ccc;
+  border-top: 3px solid #007bff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 10px;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner p {
+  margin: 0;
+  color: #555;
+  font-size: 14px;
 }
 /* Tablas */
 table {
