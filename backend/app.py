@@ -1284,21 +1284,21 @@ def create_app():
     @app.route('/api/cargar_cantidades', methods=['POST'])
     def cargar_cantidades():
         logger.info("Solicitud recibida en /api/cargar_cantidades")
-        
+
         if 'file' not in request.files:
             logger.error("No se encontró el archivo en la solicitud")
             return jsonify({'message': 'No se encontró el archivo en la solicitud'}), 400
 
         file = request.files['file']
         logger.info(f"Archivo recibido: {file.filename}")
-        
+
         if file.filename == '':
             logger.error("No se seleccionó ningún archivo")
             return jsonify({'message': 'No se seleccionó ningún archivo'}), 400
 
         stream = TextIOWrapper(file.stream, encoding='utf-8')
         reader = csv.DictReader(stream)
-        
+
         expected_columns = ['factura', 'codigo', 'nombre', 'cantidad', 'bodega', 'contenedor', 'fecha_ingreso', 'costo_unitario']
         logger.info(f"Columnas encontradas en el CSV: {reader.fieldnames}")
         missing_columns = [col for col in expected_columns if col not in reader.fieldnames]
@@ -1306,12 +1306,36 @@ def create_app():
             logger.error(f"Faltan las columnas: {', '.join(missing_columns)}")
             return jsonify({'message': f'Faltan las columnas: {", ".join(missing_columns)}'}), 400
 
+        # Preconsultar productos y bodegas
+        productos = {p.codigo: p for p in Producto.query.all()}
+        bodegas = {b.nombre: b for b in Bodega.query.all()}
+        # Obtener facturas existentes en minúsculas para case-insensitive
+        facturas_existentes = {f.factura.lower() for f in InventarioBodega.query.with_entities(InventarioBodega.factura).distinct().all()}
+        ultimo_consecutivo = db.session.query(func.max(db.cast(RegistroMovimientos.consecutivo, db.String))).scalar() or "T00000"
+        consecutivo_base = int(ultimo_consecutivo[1:]) + 1
+
         errores = []
+        nuevos_inventarios = []
+        nuevos_estados = []
+        nuevos_movimientos = []
+        nuevos_kardex = []
+        filas_procesadas = 0
+        max_filas = 10000  # Límite para evitar sobrecarga
+
         for index, row in enumerate(reader, start=1):
+            if filas_procesadas >= max_filas:
+                errores.append(f"Se alcanzó el límite de {max_filas} filas. Divida el archivo en partes más pequeñas.")
+                break
+
             try:
-                factura = row.get('factura', '').strip()
+                factura = row.get('factura', '').lower().strip()  # Normalizar a minúsculas
                 if not factura:
                     errores.append(f"Fila {index}: El número de factura es obligatorio y no puede estar vacío.")
+                    continue
+
+                # Validar factura duplicada (case-insensitive)
+                if factura in facturas_existentes:
+                    errores.append(f"Fila {index}: La factura {factura} ya existe. No se pueden cargar más productos con este número de factura.")
                     continue
 
                 codigo = row['codigo'].strip()
@@ -1321,66 +1345,57 @@ def create_app():
                 fecha_ingreso = row.get('fecha_ingreso', None)
                 costo_unitario = float(row.get('costo_unitario', 0))
 
+                if cantidad <= 0:
+                    errores.append(f"Fila {index}: La cantidad debe ser mayor que cero.")
+                    continue
+
                 if fecha_ingreso:
                     fecha_ingreso = datetime.strptime(fecha_ingreso, '%Y-%m-%d %H:%M:%S')
                 else:
                     fecha_ingreso = obtener_hora_colombia()
 
-                producto = Producto.query.filter_by(codigo=codigo).first()
+                # Validar producto y bodega
+                producto = productos.get(codigo)
                 if not producto:
                     errores.append(f"Fila {index}: Producto con código {codigo} no encontrado.")
                     continue
 
-                bodega_obj = Bodega.query.filter_by(nombre=bodega).first()
+                bodega_obj = bodegas.get(bodega)
                 if not bodega_obj:
                     errores.append(f"Fila {index}: Bodega con nombre {bodega} no encontrada.")
                     continue
 
-                # Verificar si el producto tiene inventario previo en alguna bodega
-                inventario_previo = InventarioBodega.query.filter_by(producto_id=producto.id).first()
-                if not inventario_previo:
-                    descripcion = f"Cargue inicial con Factura de compra {factura}"
-                else:
-                    descripcion = f"Ingreso de nueva mercancía con Factura de compra {factura}"
+                facturas_existentes.add(factura)  # Marcar factura como procesada para este lote
 
-                # Actualizar inventario_bodega
+                # Determinar descripción
+                inventario_previo = InventarioBodega.query.filter_by(producto_id=producto.id).first()
+                descripcion = f"Cargue inicial con Factura de compra {factura}" if not inventario_previo else f"Ingreso de nueva mercancía con Factura de compra {factura}"
+
+                # Preparar inventario_bodega
                 inventario = InventarioBodega.query.filter_by(producto_id=producto.id, bodega_id=bodega_obj.id).first()
                 if not inventario:
                     inventario = InventarioBodega(
                         producto_id=producto.id,
                         bodega_id=bodega_obj.id,
                         cantidad=cantidad,
-                        factura=factura,
+                        factura=factura,  # Almacenar en minúsculas
                         contenedor=contenedor,
                         fecha_ingreso=fecha_ingreso,
                         costo_unitario=costo_unitario,
                         costo_total=cantidad * costo_unitario
                     )
-                    db.session.add(inventario)
+                    nuevos_inventarios.append(inventario)
                 else:
                     costo_total_nuevo = (float(inventario.cantidad) * float(inventario.costo_unitario)) + (cantidad * costo_unitario)
                     inventario.cantidad += cantidad
                     inventario.costo_unitario = costo_total_nuevo / inventario.cantidad if inventario.cantidad > 0 else costo_unitario
                     inventario.costo_total = inventario.cantidad * inventario.costo_unitario
-                    inventario.factura = factura
+                    inventario.factura = factura  # Actualizar a minúsculas
                     inventario.contenedor = contenedor
                     inventario.fecha_ingreso = fecha_ingreso
 
-                # Verificación de duplicados
-                movimiento_existente = RegistroMovimientos.query.filter_by(
-                    producto_id=producto.id,
-                    bodega_destino_id=bodega_obj.id,
-                    tipo_movimiento='ENTRADA',
-                    descripcion=descripcion
-                ).first()
-                if movimiento_existente:
-                    errores.append(f"Fila {index}: La factura {factura} ya fue procesada para el producto {codigo} en {bodega}.")
-                    continue
-
-                # Actualizar estado_inventario
-                estado_inventario = EstadoInventario.query.filter_by(
-                    producto_id=producto.id, bodega_id=bodega_obj.id
-                ).first()
+                # Preparar estado_inventario
+                estado_inventario = EstadoInventario.query.filter_by(producto_id=producto.id, bodega_id=bodega_obj.id).first()
                 if not estado_inventario:
                     estado_inventario = EstadoInventario(
                         producto_id=producto.id,
@@ -1390,7 +1405,7 @@ def create_app():
                         costo_unitario=costo_unitario,
                         costo_total=cantidad * costo_unitario
                     )
-                    db.session.add(estado_inventario)
+                    nuevos_estados.append(estado_inventario)
                 else:
                     costo_total_nuevo = (float(estado_inventario.cantidad) * float(estado_inventario.costo_unitario)) + (cantidad * costo_unitario)
                     estado_inventario.cantidad += cantidad
@@ -1399,12 +1414,9 @@ def create_app():
                     estado_inventario.ultima_actualizacion = fecha_ingreso
 
                 # Generar consecutivo
-                ultimo_consecutivo = db.session.query(
-                    db.func.max(db.cast(RegistroMovimientos.consecutivo, db.String))
-                ).scalar() or "T00000"
-                nuevo_consecutivo = f"T{int(ultimo_consecutivo[1:]) + 1:05d}"
+                nuevo_consecutivo = f"T{consecutivo_base + filas_procesadas:05d}"
 
-                # Registrar en registro_movimientos
+                # Preparar registro_movimientos
                 nuevo_movimiento = RegistroMovimientos(
                     consecutivo=nuevo_consecutivo,
                     producto_id=producto.id,
@@ -1417,9 +1429,9 @@ def create_app():
                     costo_unitario=costo_unitario,
                     costo_total=cantidad * costo_unitario
                 )
-                db.session.add(nuevo_movimiento)
+                nuevos_movimientos.append(nuevo_movimiento)
 
-                # Registrar en kardex con la misma descripción que RegistroMovimientos
+                # Preparar kardex
                 kardex_entry = Kardex(
                     producto_id=producto.id,
                     bodega_origen_id=None,
@@ -1432,14 +1444,13 @@ def create_app():
                     saldo_cantidad=estado_inventario.cantidad,
                     saldo_costo_unitario=estado_inventario.costo_unitario,
                     saldo_costo_total=estado_inventario.costo_total,
-                    referencia=descripcion  # Usar la misma descripción para mantener consistencia
+                    referencia=descripcion
                 )
-                db.session.add(kardex_entry)
+                nuevos_kardex.append(kardex_entry)
 
-                db.session.commit()
+                filas_procesadas += 1
 
             except Exception as e:
-                db.session.rollback()
                 errores.append(f"Fila {index}: Error al procesar la fila ({str(e)})")
                 logger.error(f"Fila {index}: Error al procesar - {str(e)}")
 
@@ -1447,8 +1458,20 @@ def create_app():
             logger.error(f"Errores al procesar el archivo: {errores}")
             return jsonify({'message': 'Errores al procesar el archivo', 'errors': errores}), 400
 
-        logger.info("Cantidades cargadas correctamente")
-        return jsonify({'message': 'Cantidades cargadas correctamente'}), 201
+        try:
+            # Insertar todos los registros en lote
+            db.session.bulk_save_objects(nuevos_inventarios)
+            db.session.bulk_save_objects(nuevos_estados)
+            db.session.bulk_save_objects(nuevos_movimientos)
+            db.session.bulk_save_objects(nuevos_kardex)
+            db.session.commit()
+            logger.info("Cantidades cargadas correctamente")
+            return jsonify({'message': 'Cantidades cargadas correctamente'}), 201
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error al guardar en la base de datos: {str(e)}")
+            return jsonify({'message': 'Error al guardar los datos', 'errors': [str(e)]}), 500
 
 
     @app.route('/api/cargar_notas_credito', methods=['POST'])
@@ -1732,6 +1755,8 @@ def create_app():
             return jsonify({'error': 'Error al listar facturas'}), 500
 
 
+
+
     @app.route('/api/consultar_facturas', methods=['GET'])
     def consultar_facturas():
         try:
@@ -1742,11 +1767,11 @@ def create_app():
             # Consulta basada en RegistroMovimientos
             query = RegistroMovimientos.query.filter(
                 RegistroMovimientos.tipo_movimiento == 'ENTRADA',
-                RegistroMovimientos.descripcion.like('%Factura de compra%')  # Solo movimientos con factura
+                RegistroMovimientos.descripcion.like('%Factura de compra%')
             )
 
             if factura:
-                query = query.filter(RegistroMovimientos.descripcion.like(f'%{factura}%'))
+                query = query.filter(RegistroMovimientos.descripcion.like(f'%{factura}%'))  # Case-sensitive
             if fecha_inicio:
                 query = query.filter(RegistroMovimientos.fecha >= fecha_inicio)
             if fecha_fin:
@@ -1763,15 +1788,13 @@ def create_app():
 
             # Procesar resultados y filtrar notas de crédito
             response = []
-            seen_facturas = set()  # Para evitar duplicados
+            seen_facturas = set()
             for item in resultados:
-                # Extraer el número de factura de la descripción
                 try:
-                    factura_num = item.descripcion.split("Factura de compra ")[-1].strip()
+                    factura_num = item.descripcion.split("Factura de compra ")[-1].strip()  # Mantener formato original
                 except IndexError:
-                    continue  # Si no hay "Factura de compra" en la descripción, omitir
+                    continue
 
-                # Filtrar notas de crédito y duplicados
                 if factura_num.startswith('NC') or factura_num in seen_facturas:
                     continue
 
