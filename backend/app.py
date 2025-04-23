@@ -4745,7 +4745,7 @@ def create_app():
                 costo_unitario = float(ultimo_kardex.saldo_costo_unitario) if ultimo_kardex else 0.0
 
                 peso_x_paquete = float(material.peso_unitario) if material.peso_unitario is not None else (
-                    float(producto_base.peso_unidad_gr) if producto_base and producto_base.peso_unidad_gr is not None else 0.0
+                    float(producto_base.peso_unitario) if producto_base and producto_base.peso_unitario is not None else 0.0
                 )
                 cantidad_total = float(material.cantidad) * orden.cantidad_paquetes  # Convertir a float
                 peso_total = cantidad_total * peso_x_paquete
