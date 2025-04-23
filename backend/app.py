@@ -2664,17 +2664,24 @@ def create_app():
             for e in EstadoInventario.query.all()
         }
         facturas_existentes = {f.factura.lower() for f in Venta.query.with_entities(Venta.factura).distinct().all()}
-        # Preconsultar último Kardex por producto y bodega
+        
+        # Preconsultar último Kardex por producto y bodega (CORREGIDO para SQLAlchemy 2.x)
+        subquery = (
+            select(Kardex.producto_id, Kardex.bodega_origen_id, func.max(Kardex.id).label('max_id'))
+            .group_by(Kardex.producto_id, Kardex.bodega_origen_id)
+            .subquery()
+        )
         ultimo_kardex_query = db.session.query(
             Kardex.producto_id,
             Kardex.bodega_origen_id,
             Kardex.saldo_costo_unitario,
             Kardex.saldo_cantidad,
             Kardex.saldo_costo_total
-        ).filter(
-            Kardex.id.in_(
-                select([func.max(Kardex.id)]).group_by(Kardex.producto_id, Kardex.bodega_origen_id)
-            )
+        ).join(
+            subquery,
+            (Kardex.id == subquery.c.max_id) &
+            (Kardex.producto_id == subquery.c.producto_id) &
+            (Kardex.bodega_origen_id == subquery.c.bodega_origen_id)
         ).all()
         ultimo_kardex = {
             (k.producto_id, k.bodega_origen_id): k
@@ -2732,15 +2739,17 @@ def create_app():
 
                         # Calcular saldo disponible hasta la fecha de venta
                         saldo_query = db.session.execute(
-                            select([
-                                func.sum(case(
-                                    [
-                                        (Kardex.tipo_movimiento == 'ENTRADA', Kardex.cantidad),
-                                        (Kardex.tipo_movimiento == 'SALIDA', -Kardex.cantidad)
-                                    ],
-                                    else_=0
-                                )).label('saldo')
-                            ]).where(
+                            select(
+                                func.sum(
+                                    case(
+                                        [
+                                            (Kardex.tipo_movimiento == 'ENTRADA', Kardex.cantidad),
+                                            (Kardex.tipo_movimiento == 'SALIDA', -Kardex.cantidad)
+                                        ],
+                                        else_=0
+                                    )
+                                ).label('saldo')
+                            ).where(
                                 Kardex.producto_id == producto.id,
                                 Kardex.fecha <= fecha_venta.replace(tzinfo=pytz.timezone('America/Bogota')),
                                 (Kardex.bodega_destino_id == bodega.id) | (Kardex.bodega_origen_id == bodega.id)
