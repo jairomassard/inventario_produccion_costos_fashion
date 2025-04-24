@@ -1309,12 +1309,13 @@ def create_app():
             logger.error(f"Faltan las columnas: {', '.join(missing_columns)}")
             return jsonify({'message': f'Faltan las columnas: {", ".join(missing_columns)}'}), 400
 
-        # Preconsultar productos y bodegas
+        # Preconsultar productos, bodegas, inventarios y facturas existentes
         productos = {p.codigo: p for p in Producto.query.all()}
         bodegas = {b.nombre: b for b in Bodega.query.all()}
-        # Obtener facturas existentes en minúsculas para case-insensitive
         facturas_existentes = {f.factura.lower() for f in InventarioBodega.query.with_entities(InventarioBodega.factura).distinct().all()}
-        ultimo_consecutivo = db.session.query(func.max(db.cast(RegistroMovimientos.consecutivo, db.String))).scalar() or "T00000"
+        inventarios_existentes = {(i.producto_id, i.bodega_id, i.factura.lower()): i for i in InventarioBodega.query.all()}
+        estados_existentes = {(e.producto_id, e.bodega_id): e for e in EstadoInventario.query.all()}
+        ultimo_consecutivo = db.session.query(func.max(RegistroMovimientos.consecutivo)).scalar() or "T00000"
         consecutivo_base = int(ultimo_consecutivo[1:]) + 1
 
         errores = []
@@ -1324,7 +1325,33 @@ def create_app():
         nuevos_kardex = []
         filas_procesadas = 0
         max_filas = 10000  # Límite para evitar sobrecarga
+        facturas_csv = {}  # Agrupar filas por factura para validar duplicados internos
 
+        # Primera pasada: Validar duplicados dentro del CSV
+        stream.seek(0)
+        reader = csv.DictReader(stream)
+        for index, row in enumerate(reader, start=1):
+            factura = row.get('factura', '').strip().lower()
+            codigo = row.get('codigo', '').strip()
+            bodega = row.get('bodega', '').strip()
+            if not factura or not codigo or not bodega:
+                continue  # Errores de datos se validarán en la segunda pasada
+            key = (factura, codigo, bodega)
+            if factura not in facturas_csv:
+                facturas_csv[factura] = []
+            facturas_csv[factura].append((index, key))
+
+        # Validar duplicados dentro del CSV
+        for factura, filas in facturas_csv.items():
+            seen = set()
+            for index, key in filas:
+                if key in seen:
+                    errores.append(f"Fila {index}: Combinación duplicada de factura {key[0]} con producto {key[1]} y bodega {key[2]} en el CSV.")
+                seen.add(key)
+
+        # Segunda pasada: Procesar las filas
+        stream.seek(0)
+        reader = csv.DictReader(stream)
         for index, row in enumerate(reader, start=1):
             if filas_procesadas >= max_filas:
                 errores.append(f"Se alcanzó el límite de {max_filas} filas. Divida el archivo en partes más pequeñas.")
@@ -1336,69 +1363,80 @@ def create_app():
                     errores.append(f"Fila {index}: El número de factura es obligatorio y no puede estar vacío.")
                     continue
 
-                # Validar factura duplicada (case-insensitive)
-                if factura.lower() in facturas_existentes:
-                    errores.append(f"Fila {index}: La factura {factura} ya existe. No se pueden cargar más productos con este número de factura.")
-                    continue
-
-                codigo = row['codigo'].strip()
-                cantidad = int(row['cantidad'])
-                bodega = row['bodega'].strip()
+                codigo = row.get('codigo', '').strip()
+                nombre = row.get('nombre', '').strip()
+                cantidad = row.get('cantidad', '').strip()
+                bodega = row.get('bodega', '').strip()
                 contenedor = row.get('contenedor', '').strip()
-                fecha_ingreso = row.get('fecha_ingreso', None)
-                costo_unitario = float(row.get('costo_unitario', 0))
+                fecha_ingreso = row.get('fecha_ingreso', '').strip()
+                costo_unitario = row.get('costo_unitario', '').strip()
 
-                if cantidad <= 0:
-                    errores.append(f"Fila {index}: La cantidad debe ser mayor que cero.")
+                # Validar datos
+                if not codigo:
+                    errores.append(f"Fila {index}: El código del producto es obligatorio.")
                     continue
-
+                if not cantidad:
+                    errores.append(f"Fila {index}: La cantidad es obligatoria.")
+                    continue
+                try:
+                    cantidad = int(cantidad)
+                    if cantidad <= 0:
+                        errores.append(f"Fila {index}: La cantidad debe ser mayor que cero.")
+                        continue
+                except ValueError:
+                    errores.append(f"Fila {index}: La cantidad debe ser un número entero.")
+                    continue
+                if not bodega:
+                    errores.append(f"Fila {index}: La bodega es obligatoria.")
+                    continue
+                try:
+                    costo_unitario = float(costo_unitario) if costo_unitario else 0.0
+                except ValueError:
+                    errores.append(f"Fila {index}: El costo unitario debe ser un número.")
+                    continue
                 if fecha_ingreso:
-                    fecha_ingreso = datetime.strptime(fecha_ingreso, '%Y-%m-%d %H:%M:%S')
+                    try:
+                        fecha_ingreso = datetime.strptime(fecha_ingreso, '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        errores.append(f"Fila {index}: Formato de fecha inválido. Use 'YYYY-MM-DD HH:MM:SS'.")
+                        continue
                 else:
-                    fecha_ingreso = obtener_hora_colombia()  # Usar hora actual si no se proporciona
+                    fecha_ingreso = obtener_hora_colombia()
 
                 # Validar producto y bodega
                 producto = productos.get(codigo)
                 if not producto:
                     errores.append(f"Fila {index}: Producto con código {codigo} no encontrado.")
                     continue
-
                 bodega_obj = bodegas.get(bodega)
                 if not bodega_obj:
                     errores.append(f"Fila {index}: Bodega con nombre {bodega} no encontrada.")
                     continue
 
-                facturas_existentes.add(factura.lower())  # Marcar factura como procesada (case-insensitive)
+                # Validar factura duplicada en la base de datos
+                if (producto.id, bodega_obj.id, factura.lower()) in inventarios_existentes:
+                    errores.append(f"Fila {index}: Ya existe un registro con factura {factura} para el producto {codigo} en la bodega {bodega}.")
+                    continue
 
                 # Determinar descripción
-                inventario_previo = InventarioBodega.query.filter_by(producto_id=producto.id).first()
-                descripcion = f"Cargue inicial con Factura de compra {factura}" if not inventario_previo else f"Ingreso de nueva mercancía con Factura de compra {factura}"
+                descripcion = f"Ingreso de mercancía con Factura de compra {factura}"
 
                 # Preparar inventario_bodega
-                inventario = InventarioBodega.query.filter_by(producto_id=producto.id, bodega_id=bodega_obj.id).first()
-                if not inventario:
-                    inventario = InventarioBodega(
-                        producto_id=producto.id,
-                        bodega_id=bodega_obj.id,
-                        cantidad=cantidad,
-                        factura=factura,  # Usar factura con case original
-                        contenedor=contenedor,
-                        fecha_ingreso=fecha_ingreso,
-                        costo_unitario=costo_unitario,
-                        costo_total=cantidad * costo_unitario
-                    )
-                    nuevos_inventarios.append(inventario)
-                else:
-                    costo_total_nuevo = (float(inventario.cantidad) * float(inventario.costo_unitario)) + (cantidad * costo_unitario)
-                    inventario.cantidad += cantidad
-                    inventario.costo_unitario = costo_total_nuevo / inventario.cantidad if inventario.cantidad > 0 else costo_unitario
-                    inventario.costo_total = inventario.cantidad * inventario.costo_unitario
-                    inventario.factura = factura  # Usar factura con case original
-                    inventario.contenedor = contenedor
-                    inventario.fecha_ingreso = fecha_ingreso
+                inventario = InventarioBodega(
+                    producto_id=producto.id,
+                    bodega_id=bodega_obj.id,
+                    cantidad=cantidad,
+                    factura=factura,
+                    contenedor=contenedor,
+                    fecha_ingreso=fecha_ingreso,
+                    costo_unitario=costo_unitario,
+                    costo_total=cantidad * costo_unitario
+                )
+                nuevos_inventarios.append(inventario)
+                inventarios_existentes[(producto.id, bodega_obj.id, factura.lower())] = inventario
 
                 # Preparar estado_inventario
-                estado_inventario = EstadoInventario.query.filter_by(producto_id=producto.id, bodega_id=bodega_obj.id).first()
+                estado_inventario = estados_existentes.get((producto.id, bodega_obj.id))
                 if not estado_inventario:
                     estado_inventario = EstadoInventario(
                         producto_id=producto.id,
@@ -1409,6 +1447,7 @@ def create_app():
                         costo_total=cantidad * costo_unitario
                     )
                     nuevos_estados.append(estado_inventario)
+                    estados_existentes[(producto.id, bodega_obj.id)] = estado_inventario
                 else:
                     costo_total_nuevo = (float(estado_inventario.cantidad) * float(estado_inventario.costo_unitario)) + (cantidad * costo_unitario)
                     estado_inventario.cantidad += cantidad
@@ -1425,7 +1464,7 @@ def create_app():
                     producto_id=producto.id,
                     tipo_movimiento='ENTRADA',
                     cantidad=cantidad,
-                    bodega_origen=None,
+                    bodega_origen_id=None,
                     bodega_destino_id=bodega_obj.id,
                     fecha=fecha_ingreso,
                     descripcion=descripcion,
@@ -1459,6 +1498,7 @@ def create_app():
 
         if errores:
             logger.error(f"Errores al procesar el archivo: {errores}")
+            db.session.rollback()
             return jsonify({'message': 'Errores al procesar el archivo', 'errors': errores}), 400
 
         try:
@@ -2663,8 +2703,11 @@ def create_app():
             (e.producto_id, e.bodega_id): e
             for e in EstadoInventario.query.all()
         }
-        facturas_existentes = {f.factura.lower() for f in Venta.query.with_entities(Venta.factura).distinct().all()}
-        
+        ventas_existentes = {
+            (v.producto_id, v.bodega_id, v.factura.lower()): v
+            for v in Venta.query.all()
+        }
+
         # Preconsultar último Kardex por producto y bodega
         subquery = (
             select(Kardex.producto_id, Kardex.bodega_origen_id, func.max(Kardex.id).label('max_id'))
@@ -2689,11 +2732,35 @@ def create_app():
         }
 
         # Obtener último consecutivo
-        ultimo_consecutivo = db.session.query(func.max(db.cast(RegistroMovimientos.consecutivo, db.String))).scalar() or "T00000"
+        ultimo_consecutivo = db.session.query(func.max(RegistroMovimientos.consecutivo)).scalar() or "T00000"
         consecutivo_base = int(ultimo_consecutivo[1:]) + 1
 
-        # Identificar productos y bodegas únicos en el CSV
-        stream.seek(0)  # Reiniciar el stream para leer de nuevo
+        # Primera pasada: Validar duplicados dentro del CSV
+        stream.seek(0)
+        reader = csv.DictReader(stream)
+        facturas_csv = {}
+        for index, row in enumerate(reader, start=1):
+            factura = row.get('factura', '').strip().lower()
+            codigo = row.get('codigo', '').strip()
+            bodega = row.get('bodega', '').strip()
+            if not factura or not codigo or not bodega:
+                continue  # Errores de datos se validarán en la segunda pasada
+            key = (factura, codigo, bodega)
+            if factura not in facturas_csv:
+                facturas_csv[factura] = []
+            facturas_csv[factura].append((index, key))
+
+        # Validar duplicados dentro del CSV
+        errores = []
+        for factura, filas in facturas_csv.items():
+            seen = set()
+            for index, key in filas:
+                if key in seen:
+                    errores.append(f"Fila {index}: Combinación duplicada de factura {key[0]} con producto {key[1]} y bodega {key[2]} en el CSV.")
+                seen.add(key)
+
+        # Identificar productos, bodegas y fechas únicas en el CSV
+        stream.seek(0)
         reader = csv.DictReader(stream)
         producto_codigos = set()
         bodega_nombres = set()
@@ -2701,7 +2768,10 @@ def create_app():
         for row in reader:
             producto_codigos.add(row['codigo'].strip())
             bodega_nombres.add(row['bodega'].strip())
-            fecha_ventas.add(datetime.strptime(row['fecha_venta'], '%Y-%m-%d %H:%M:%S'))
+            try:
+                fecha_ventas.add(datetime.strptime(row['fecha_venta'], '%Y-%m-%d %H:%M:%S'))
+            except ValueError:
+                continue  # Errores de fecha se validarán en la segunda pasada
 
         # Mapear códigos a IDs
         producto_ids = {p.id for p in productos.values() if p.codigo in producto_codigos}
@@ -2733,143 +2803,175 @@ def create_app():
         stream.seek(0)
         reader = csv.DictReader(stream)
 
-        errores = []
         nuevos_movimientos = []
         nuevos_kardex = []
         nuevas_ventas = []
         filas_procesadas = 0
         max_filas = 10000  # Límite para evitar sobrecarga
 
-        try:
-            for index, row in enumerate(reader, start=1):
-                if filas_procesadas >= max_filas:
-                    errores.append(f"Se alcanzó el límite de {max_filas} filas. Divida el archivo en partes más pequeñas.")
-                    break
+        for index, row in enumerate(reader, start=1):
+            if filas_procesadas >= max_filas:
+                errores.append(f"Se alcanzó el límite de {max_filas} filas. Divida el archivo en partes más pequeñas.")
+                break
 
+            try:
+                factura = row['factura'].strip()
+                if not factura:
+                    errores.append(f"Fila {index}: El número de factura es obligatorio y no puede estar vacío.")
+                    continue
+                if not (factura.startswith('FB') or factura.startswith('CC')):
+                    errores.append(f"Fila {index}: El número de factura debe comenzar con 'FB' o 'CC'.")
+                    continue
+
+                codigo = row['codigo'].strip()
+                nombre = row['nombre'].strip()
+                cantidad = row.get('cantidad', '').strip()
+                fecha_venta = row['fecha_venta'].strip()
+                bodega_nombre = row['bodega'].strip()
+                precio_unitario = row['precio_unitario'].strip() if has_precio_unitario else ''
+
+                # Validar datos
+                if not codigo:
+                    errores.append(f"Fila {index}: El código del producto es obligatorio.")
+                    continue
+                if not cantidad:
+                    errores.append(f"Fila {index}: La cantidad es obligatoria.")
+                    continue
                 try:
-                    factura = row['factura'].strip()
-                    if not factura:
-                        errores.append(f"Fila {index}: El número de factura es obligatorio y no puede estar vacío.")
+                    cantidad = int(cantidad)
+                    if cantidad <= 0:
+                        errores.append(f"Fila {index}: La cantidad debe ser mayor que cero.")
                         continue
-                    if not (factura.startswith('FB') or factura.startswith('CC')):
-                        errores.append(f"Fila {index}: El número de factura debe comenzar con 'FB' o 'CC'.")
-                        continue
-                    if factura.lower() in facturas_existentes:
-                        errores.append(f"Fila {index}: La factura {factura} ya existe.")
-                        continue
+                except ValueError:
+                    errores.append(f"Fila {index}: La cantidad debe ser un número entero.")
+                    continue
+                if not fecha_venta:
+                    errores.append(f"Fila {index}: La fecha de venta es obligatoria.")
+                    continue
+                try:
+                    fecha_venta = datetime.strptime(fecha_venta, '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    errores.append(f"Fila {index}: Formato de fecha inválido. Use 'YYYY-MM-DD HH:MM:SS'.")
+                    continue
+                if not bodega_nombre:
+                    errores.append(f"Fila {index}: La bodega es obligatoria.")
+                    continue
+                try:
+                    precio_unitario = float(precio_unitario) if has_precio_unitario and precio_unitario else None
+                except ValueError:
+                    errores.append(f"Fila {index}: El precio unitario debe ser un número.")
+                    continue
 
-                    codigo = row['codigo'].strip()
-                    nombre = row['nombre'].strip()
-                    cantidad = int(row['cantidad'])
-                    fecha_venta = datetime.strptime(row['fecha_venta'], '%Y-%m-%d %H:%M:%S')
-                    bodega_nombre = row['bodega'].strip()
-                    precio_unitario = float(row['precio_unitario']) if has_precio_unitario and row['precio_unitario'].strip() else None
+                producto = productos.get(codigo)
+                if not producto:
+                    errores.append(f"Fila {index}: Producto con código {codigo} no encontrado")
+                    continue
 
-                    producto = productos.get(codigo)
-                    if not producto:
-                        errores.append(f"Fila {index}: Producto con código {codigo} no encontrado")
-                        continue
+                bodega = bodegas.get(bodega_nombre)
+                if not bodega:
+                    errores.append(f"Fila {index}: Bodega con nombre {bodega_nombre} no encontrada")
+                    continue
 
-                    bodega = bodegas.get(bodega_nombre)
-                    if not bodega:
-                        errores.append(f"Fila {index}: Bodega con nombre {bodega_nombre} no encontrada")
-                        continue
+                # Validar factura duplicada en la base de datos
+                if (producto.id, bodega.id, factura.lower()) in ventas_existentes:
+                    errores.append(f"Fila {index}: Ya existe una venta con factura {factura} para el producto {codigo} en la bodega {bodega_nombre}.")
+                    continue
 
-                    facturas_existentes.add(factura.lower())
+                # Validar saldo disponible desde los saldos precalculados
+                saldo = saldos.get((producto.id, bodega.id, fecha_venta), 0)
+                if saldo < cantidad:
+                    errores.append(f"Fila {index}: Inventario insuficiente para el producto {codigo} en {bodega_nombre} a la fecha {fecha_venta}. Stock disponible: {saldo}")
+                    continue
 
-                    # Validar saldo disponible desde los saldos precalculados
-                    saldo = saldos.get((producto.id, bodega.id, fecha_venta), 0)
-                    if saldo < cantidad:
-                        errores.append(f"Fila {index}: Inventario insuficiente para el producto {codigo} en {bodega_nombre} a la fecha {fecha_venta}. Stock disponible: {saldo}")
-                        continue
+                # Obtener costo unitario desde último Kardex o EstadoInventario
+                ultimo_kardex_entry = ultimo_kardex.get((producto.id, bodega.id))
+                estado_inventario = estados_inventario.get((producto.id, bodega.id))
 
-                    # Obtener costo unitario desde último Kardex o EstadoInventario
-                    ultimo_kardex_entry = ultimo_kardex.get((producto.id, bodega.id))
-                    estado_inventario = estados_inventario.get((producto.id, bodega.id))
+                if ultimo_kardex_entry:
+                    costo_unitario = ultimo_kardex_entry.saldo_costo_unitario
+                    saldo_cantidad_antes = ultimo_kardex_entry.saldo_cantidad
+                    saldo_costo_total_antes = ultimo_kardex_entry.saldo_costo_total
+                elif estado_inventario and estado_inventario.costo_unitario:
+                    costo_unitario = estado_inventario.costo_unitario
+                    saldo_cantidad_antes = estado_inventario.cantidad
+                    saldo_costo_total_antes = estado_inventario.costo_total
+                else:
+                    errores.append(f"Fila {index}: No hay costo unitario inicial para el producto {codigo} en {bodega_nombre}")
+                    continue
 
-                    if ultimo_kardex_entry:
-                        costo_unitario = ultimo_kardex_entry.saldo_costo_unitario
-                        saldo_cantidad_antes = ultimo_kardex_entry.saldo_cantidad
-                        saldo_costo_total_antes = ultimo_kardex_entry.saldo_costo_total
-                    elif estado_inventario and hasattr(estado_inventario, 'costo_unitario') and estado_inventario.costo_unitario:
-                        costo_unitario = estado_inventario.costo_unitario
-                        saldo_cantidad_antes = estado_inventario.cantidad
-                        saldo_costo_total_antes = estado_inventario.costo_total
-                    else:
-                        errores.append(f"Fila {index}: No hay costo unitario inicial para el producto {codigo} en {bodega_nombre}")
-                        continue
+                costo_total = cantidad * costo_unitario
+                saldo_cantidad = saldo_cantidad_antes - cantidad
+                saldo_costo_total = saldo_costo_total_antes - costo_total
 
-                    costo_total = cantidad * costo_unitario
-                    saldo_cantidad = saldo_cantidad_antes - cantidad
-                    saldo_costo_total = saldo_costo_total_antes - costo_total
+                # Actualizar EstadoInventario
+                if estado_inventario:
+                    estado_inventario.cantidad -= cantidad
+                    estado_inventario.ultima_actualizacion = fecha_venta
+                    estado_inventario.costo_total = estado_inventario.cantidad * estado_inventario.costo_unitario
+                else:
+                    errores.append(f"Fila {index}: No se encontró estado de inventario para {codigo} en {bodega_nombre}")
+                    continue
 
-                    # Actualizar EstadoInventario
-                    if estado_inventario:
-                        estado_inventario.cantidad -= cantidad
-                        estado_inventario.ultima_actualizacion = fecha_venta
-                        estado_inventario.costo_total = estado_inventario.cantidad * estado_inventario.costo_unitario
-                    else:
-                        errores.append(f"Fila {index}: No se encontró estado de inventario para {codigo} en {bodega_nombre}")
-                        continue
+                # Generar consecutivo
+                nuevo_consecutivo = f"T{consecutivo_base + filas_procesadas:05d}"
 
-                    # Generar consecutivo
-                    nuevo_consecutivo = f"T{consecutivo_base + filas_procesadas:05d}"
+                # Preparar RegistroMovimientos
+                nuevo_movimiento = RegistroMovimientos(
+                    consecutivo=nuevo_consecutivo,
+                    tipo_movimiento='SALIDA',
+                    producto_id=producto.id,
+                    bodega_origen_id=bodega.id,
+                    bodega_destino_id=None,
+                    cantidad=cantidad,
+                    fecha=fecha_venta,
+                    descripcion=f"Salida de mercancía por venta con Factura {factura} desde {bodega_nombre}",
+                    costo_unitario=costo_unitario,
+                    costo_total=costo_total
+                )
+                nuevos_movimientos.append(nuevo_movimiento)
 
-                    # Preparar RegistroMovimientos
-                    nuevo_movimiento = RegistroMovimientos(
-                        consecutivo=nuevo_consecutivo,
-                        tipo_movimiento='SALIDA',
-                        producto_id=producto.id,
-                        bodega_origen_id=bodega.id,
-                        bodega_destino_id=None,
-                        cantidad=cantidad,
-                        fecha=fecha_venta,
-                        descripcion=f"Salida de mercancía por venta con Factura {factura} desde {bodega_nombre}",
-                        costo_unitario=costo_unitario,
-                        costo_total=costo_total
-                    )
-                    nuevos_movimientos.append(nuevo_movimiento)
+                # Preparar Kardex
+                kardex_salida = Kardex(
+                    producto_id=producto.id,
+                    tipo_movimiento='SALIDA',
+                    bodega_origen_id=bodega.id,
+                    bodega_destino_id=None,
+                    cantidad=cantidad,
+                    costo_unitario=costo_unitario,
+                    costo_total=costo_total,
+                    fecha=fecha_venta.replace(tzinfo=pytz.timezone('America/Bogota')),
+                    referencia=f"Salida de mercancía por venta con Factura {factura} desde {bodega_nombre}",
+                    saldo_cantidad=saldo_cantidad,
+                    saldo_costo_unitario=costo_unitario if saldo_cantidad > 0 else 0.0,
+                    saldo_costo_total=saldo_costo_total
+                )
+                nuevos_kardex.append(kardex_salida)
 
-                    # Preparar Kardex
-                    kardex_salida = Kardex(
-                        producto_id=producto.id,
-                        tipo_movimiento='SALIDA',
-                        bodega_origen_id=bodega.id,
-                        bodega_destino_id=None,
-                        cantidad=cantidad,
-                        costo_unitario=costo_unitario,
-                        costo_total=costo_total,
-                        fecha=fecha_venta.replace(tzinfo=pytz.timezone('America/Bogota')),
-                        referencia=f"Salida de mercancía por venta con Factura {factura} desde {bodega_nombre}",
-                        saldo_cantidad=saldo_cantidad,
-                        saldo_costo_unitario=costo_unitario if saldo_cantidad > 0 else 0.0,
-                        saldo_costo_total=saldo_costo_total
-                    )
-                    nuevos_kardex.append(kardex_salida)
+                # Preparar Venta
+                venta = Venta(
+                    factura=factura,
+                    producto_id=producto.id,
+                    nombre_producto=nombre,
+                    cantidad=cantidad,
+                    fecha_venta=fecha_venta,
+                    bodega_id=bodega.id,
+                    precio_unitario=precio_unitario
+                )
+                nuevas_ventas.append(venta)
+                ventas_existentes[(producto.id, bodega.id, factura.lower())] = venta
 
-                    # Preparar Venta
-                    venta = Venta(
-                        factura=factura,
-                        producto_id=producto.id,
-                        nombre_producto=nombre,
-                        cantidad=cantidad,
-                        fecha_venta=fecha_venta,
-                        bodega_id=bodega.id,
-                        precio_unitario=precio_unitario
-                    )
-                    nuevas_ventas.append(venta)
+                filas_procesadas += 1
 
-                    filas_procesadas += 1
+            except Exception as e:
+                errores.append(f"Fila {index}: Error procesando la fila ({str(e)})")
+                logger.error(f"Fila {index}: Error procesando - {str(e)}")
 
-                except Exception as e:
-                    errores.append(f"Fila {index}: Error procesando la fila ({str(e)})")
-                    logger.error(f"Fila {index}: Error procesando - {str(e)}")
+        if errores:
+            logger.error(f"Errores al procesar el archivo: {errores}")
+            db.session.rollback()
+            return jsonify({'message': 'Errores al procesar el archivo', 'errors': errores}), 400
 
-            if errores:
-                logger.error(f"Errores al procesar el archivo: {errores}")
-                db.session.rollback()
-                return jsonify({'message': 'Errores al procesar el archivo', 'errors': errores}), 400
-
+        try:
             # Insertar en lote y confirmar transacción
             db.session.bulk_save_objects(nuevos_movimientos)
             db.session.bulk_save_objects(nuevos_kardex)
