@@ -4864,10 +4864,8 @@ def create_app():
             nombre_creador = f"{usuario_creador.nombres} {usuario_creador.apellidos}" if usuario_creador else "Desconocido"
 
             # Consultar el usuario que produjo la orden
-            nombre_productor = "N/A"
-            if orden.en_produccion_por:
-                usuario_productor = db.session.get(Usuario, orden.en_produccion_por)
-                nombre_productor = f"{usuario_productor.nombres} {usuario_productor.apellidos}" if usuario_productor else "N/A"
+            usuario_productor = db.session.get(Usuario, orden.en_produccion_por)
+            nombre_productor = f"{usuario_productor.nombres} {usuario_productor.apellidos}" if usuario_productor else "N/A"
 
             # Verificar si la orden tuvo un cierre forzado
             tiene_cierre_forzado = bool(orden.comentario_cierre_forzado)
@@ -4903,7 +4901,7 @@ def create_app():
             y -= 15
             pdf.drawString(50, y, f"Estado: {orden.estado}")
             y -= 15
-            pdf.drawString(50, y, f"Costo Unitario: ${float(orden.costo_unitario):.2f}  |  Costo Total: ${float(orden.costo_total):.2f}")
+            pdf.drawString(50, y, f"Costo Unitario: ${orden.costo_unitario:.2f}  |  Costo Total: ${orden.costo_total:.2f}")
             y -= 15
             pdf.setFont("Helvetica", 8)
             pdf.drawString(50, y, f"Creado por: {nombre_creador}")
@@ -4935,7 +4933,7 @@ def create_app():
             pdf.drawString(50, y, "Componente")
             pdf.drawString(250, y, "Cant. x Paquete")
             pdf.drawString(320, y, "Cant. Total")
-            pdf.drawString(380, y, "Peso Unitario (gr)")
+            pdf.drawString(380, y, "Peso x Paquete")
             pdf.drawString(450, y, "Peso Total")
             pdf.drawString(520, y, "Costo Unitario")
             pdf.drawString(590, y, "Costo Total")
@@ -4963,29 +4961,22 @@ def create_app():
             for material in materiales_producto:
                 producto_base = db.session.get(Producto, material.producto_base_id)
 
-                # Obtener peso unitario
-                peso_unitario = float(material.peso_unitario) if material.peso_unitario is not None else (
-                    float(producto_base.peso_unitario) if producto_base and producto_base.peso_unitario is not None else 0.0
-                )
-
-                # Obtener costo unitario desde el último registro en kardex
+                # Obtener costo unitario desde el último registro en kardex para la bodega de producción
                 ultimo_kardex = db.session.query(Kardex).filter(
                     Kardex.producto_id == material.producto_base_id,
                     Kardex.bodega_destino_id == orden.bodega_produccion_id
                 ).order_by(Kardex.fecha.desc()).first()
                 costo_unitario = float(ultimo_kardex.saldo_costo_unitario) if ultimo_kardex else 0.0
 
-                # Convertir a float para evitar errores de tipo
-                cantidad = float(material.cantidad)
-                cantidad_paquetes = float(orden.cantidad_paquetes)
-                cantidad_total = cantidad * cantidad_paquetes
-                peso_total = cantidad_total * peso_unitario
+                peso_x_paquete = float(material.cantidad * material.peso_unitario) if material.peso_unitario is not None else 0.0
+                cantidad_total = float(material.cantidad) * orden.cantidad_paquetes
+                peso_total = float(material.cantidad * material.peso_unitario * orden.cantidad_paquetes)
                 costo_total = cantidad_total * costo_unitario
 
                 y = draw_wrapped_text(pdf, 50, y, f"{producto_base.codigo} - {producto_base.nombre}", 200)
-                pdf.drawString(250, y + 8, f"{cantidad:.2f}")
+                pdf.drawString(250, y + 8, f"{material.cantidad:.2f}")
                 pdf.drawString(320, y + 8, f"{cantidad_total:.2f}")
-                pdf.drawString(380, y + 8, f"{peso_unitario:.2f}")
+                pdf.drawString(380, y + 8, f"{peso_x_paquete:.2f}")
                 pdf.drawString(450, y + 8, f"{peso_total:.2f}")
                 pdf.drawString(520, y + 8, f"${costo_unitario:.2f}")
                 pdf.drawString(590, y + 8, f"${costo_total:.2f}")
@@ -5030,7 +5021,7 @@ def create_app():
             y -= 10
             pdf.line(50, y, 742, y)
 
-            # Mostrar "Cierre Forzado" o "Orden Finalizada sin Novedad"
+            # Mostrar "Cierre Forzado" o "Orden Finalizada sin Novedad" con título en negrita
             y -= 15
             pdf.setFont("Helvetica-Bold", 10)
             if tiene_cierre_forzado:
@@ -5041,22 +5032,28 @@ def create_app():
                 pdf.drawString(50, y, "Orden en Proceso de Producción")
             y -= 15
 
-            # Mostrar el comentario (si lo hay)
+            # Mostrar el comentario (si lo hay) en texto normal
             if tiene_cierre_forzado:
                 pdf.setFont("Helvetica", 8)
                 y = draw_wrapped_text(pdf, 50, y, comentario_cierre_forzado, 700)
 
-            # Agregar firmas al final
+            # Agregar firmas al final en una fila horizontal
             if y < 80:
                 pdf.showPage()
                 y = 550
 
             pdf.setFont("Helvetica", 10)
             y -= 50
+
+            # Despachado por (izquierda)
             pdf.line(50, y, 280, y)
             pdf.drawString(50, y - 12, "Despachado por")
+
+            # Entregado por (centro)
             pdf.line(300, y, 530, y)
             pdf.drawString(300, y - 12, "Entregado por")
+
+            # Recibido (derecha)
             pdf.line(550, y, 780, y)
             pdf.drawString(550, y - 12, "Recibido")
 

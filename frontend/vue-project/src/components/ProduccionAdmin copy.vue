@@ -245,14 +245,13 @@
       <table class="tabla-componentes">
         <thead>
           <tr>
-            <th style="width: 50%">Componente</th>
-            <th style="width: 8%">Cant. x Paquete</th>
-            <th style="width: 8%">Cant. Total</th>
-            <th style="width: 8%">Peso Unitario (gr)</th> <!-- Nueva columna -->
-            <th style="width: 8%">Peso x Paquete</th>
-            <th style="width: 8%">Peso Total</th>
-            <th style="width: 8%">Costo Unitario</th>
-            <th style="width: 8%">Costo Total</th>
+            <th style="width: 60%">Componente</th>
+            <th style="width: 10%">Cant. x Paquete</th>
+            <th style="width: 10%">Cant. Total</th>
+            <th style="width: 10%">Peso x Paquete</th>
+            <th style="width: 10%">Peso Total</th>
+            <th style="width: 10%">Costo Unitario</th>
+            <th style="width: 10%">Costo Total</th>
           </tr>
         </thead>
         <tbody>
@@ -260,8 +259,7 @@
             <td>{{ componente.nombre }}</td>
             <td>{{ componente.cant_x_paquete }}</td>
             <td>{{ componente.cantidad_total.toFixed(2) }}</td>
-            <td>{{ componente.peso_unitario.toFixed(2) }}</td> <!-- Mostrar peso_unitario -->
-            <td>{{ componente.peso_x_paquete.toFixed(2) }}</td>
+            <td>{{ componente.peso_x_paquete }}</td>
             <td>{{ componente.peso_total.toFixed(2) }}</td>
             <td>${{ componente.costo_unitario.toFixed(2) }}</td>
             <td>${{ componente.costo_total.toFixed(2) }}</td>
@@ -607,7 +605,6 @@ export default {
         this.componentes = detalleResponse.data.materiales.map((componente) => ({
           nombre: componente.producto_base_nombre,
           cant_x_paquete: componente.cant_x_paquete,
-          peso_unitario: componente.peso_unitario, // Nuevo campo añadido
           peso_x_paquete: componente.peso_x_paquete,
           cantidad_total: componente.cantidad_total,
           peso_total: componente.peso_total,
@@ -1176,17 +1173,6 @@ p {
   /* Asegurar que las fechas mantengan el tamaño pequeño en responsividad */
   .tabla-fechas td {
     font-size: 10px; /* Ajuste para pantallas pequeñas */
-  }
-
-  .tabla-componentes {
-    display: block;
-    overflow-x: auto;
-    white-space: nowrap;
-    font-size: 12px;
-  }
-
-  .tabla-componentes th, .tabla-componentes td {
-    padding: 8px;
   }
 }
 </style>
