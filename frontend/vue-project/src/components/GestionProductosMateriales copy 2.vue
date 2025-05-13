@@ -7,47 +7,46 @@
     <button @click="limpiarPagina" class="btn btn-warning">Limpiar Página</button>
   </div>
 
-    <!-- Subida de Archivo CSV -->
-    <section class="carga-csv">
-      <h2>Carga Masiva de Productos desde archivo .CSV</h2>
-      <!-- Indicador de carga -->
+  <!-- Subida de Archivo CSV -->
+  <section class="carga-csv">
+    <h2>Carga Masiva de Productos desde archivo .CSV</h2>
+
+    <!-- Indicador de carga -->
       <div v-if="isLoadingCarga" class="spinner-container">
-        <div class="spinner"></div>
-        <p>Procesando archivo CSV, por favor espera...</p>
+          <div class="spinner"></div>
+          <p>Procesando archivo CSV, por favor espera...</p>
       </div>
+
       <!-- Input para subir archivo -->
       <div class="carga-input">
-        <input type="file" @change="cargarCsv" ref="inputCsv" />
-        <button @click="procesarCsv" :disabled="isLoadingCarga">Subir</button>
-        <button @click="limpiarSesionCsv" :disabled="isLoadingCarga" class="btn-warning">Limpiar Sesión</button>
+          <input type="file" @change="cargarCsv" ref="inputCsv" />
+          <button @click="procesarCsv" :disabled="isLoadingCarga">Subir</button>
+          <button @click="limpiarSesionCsv" :disabled="isLoadingCarga" class="btn-warning">Limpiar Sesión</button>
       </div>
-      <!-- Enlaces para descargar la plantilla e instructivo -->
-      <div class="carga-links">
-        <a @click="descargarPlantillaCSV" class="link-descarga">📥 Descargar Plantilla CSV</a>
-        <a @click="mostrarInstructivo" class="link-instructivo">📖 Instructivo de Uso</a>
-      </div>
-      <!-- Mostrar errores en un área de texto copiable -->
-      <div v-if="erroresCsv" class="error-container">
+
+    <!-- Mostrar errores en un área de texto copiable -->
+    <div v-if="erroresCsv" class="error-container">
         <h3>Errores Detectados</h3>
         <textarea readonly v-model="erroresCsv"></textarea>
         <button @click="copiarErrores">Copiar errores</button>
-      </div>
-      <!-- Modal para el instructivo de uso -->
-      <div v-if="mostrarModal" class="modal-instructivo">
+    </div>
+
+    <!-- Modal para el instructivo de uso -->
+    <div v-if="mostrarModal" class="modal-instructivo">
         <div class="modal-contenido">
-          <h3>📄 Instructivo de Uso para Carga de Productos</h3>
-          <p>1️⃣ **Código**: Código único del producto. No debe repetirse.</p>
-          <p>2️⃣ **Nombre**: Nombre del producto.</p>
-          <p>3️⃣ **Peso Total / Unidad**: Obligatorio solo para productos Base.</p>
-          <p>4️⃣ **Código de Barras**: Código de barras opcional.</p>
-          <p>5️⃣ **Es Producto Compuesto**: "Sí" si el producto es compuesto, "No" si es producto Base.</p>
-          <p>6️⃣ **Stock Mínimo**: Cantidad mínima de inventario (opcional, número entero o decimal).</p>
-          <p>7️⃣ **Cantidad Productos**: Si el producto es Base, se coloca 0. Si es compuesto, indicar cuántos productos lo conforman.</p>
-          <p>8️⃣ **Código y Cantidad de Productos compuestos**: Se deben indicar los códigos y cantidades de los productos compuestos.</p>
-          <button @click="cerrarModal" class="btn-cerrar">Cerrar</button>
+            <h3>📄 Instructivo de Uso para Carga de Productos</h3>
+            <p>1️⃣ **Código**: Código único del producto. No debe repetirse.</p>
+            <p>2️⃣ **Nombre**: Nombre del producto.</p>
+            <p>3️⃣ **Peso Total / Unidad**: Obligatorio solo para productos Base.</p>
+            <p>4️⃣ **Código de Barras**: Código de barras opcional.</p>
+            <p>5️⃣ **Es Producto Compuesto**: "Sí" si el producto es compuesto, "No" si es producto Base.</p>
+            <p>6️⃣ **Stock Mínimo**: Cantidad mínima de inventario (opcional, número entero o decimal).</p>
+            <p>7️⃣ **Cantidad Productos**: Si el producto es Base, se coloca 0. Si es compuesto, indicar cuántos productos lo conforman.</p>
+            <p>8️⃣ **Código y Cantidad de Productos compuestos**: Se deben indicar los códigos y cantidades de los productos compuestos.</p>
+            <button @click="cerrarModal" class="btn-cerrar">Cerrar</button>
         </div>
-      </div>
-    </section>
+    </div>
+</section>
 
  <!-- Nueva sección: Actualización masiva de productos -->
   <!-- Sección: Actualización Masiva de Productos -->
@@ -184,8 +183,8 @@
                 <td>
                     <input v-model.number="material.cantidad" type="number" step="0.01" min="0.01" required @input="actualizarPesoMaterial(index)" />
                 </td>
-                <td>{{ material.peso_unitario.toFixed(4) }}</td>
-                <td>{{ material.peso_total.toFixed(4) }}</td>
+                <td>{{ material.peso_unitario }}</td>
+                <td>{{ material.peso_total }}</td>
                 <td>
                     <button @click.prevent="eliminarMaterial(index)">Eliminar</button>
                 </td>
