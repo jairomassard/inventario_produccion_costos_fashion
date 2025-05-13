@@ -155,8 +155,8 @@
                 Eliminar Orden
               </button>
               <button @click="cargarDetalleOrden(orden.id)">Detalle</button>
-              <button @click="descargarPdf(orden.id)">Imprimir <i class="fas fa-file-pdf pdf-icon"></i></button> <!-- Botón de PDF -->
-              <button @click="descargarPdfOperador(detalleOrden?.id)">Imprimir Sin costos <i class="fas fa-file-pdf pdf-icon"></i></button>
+              <button @click="descargarPdf(orden.id, orden.numero_orden)">Imprimir <i class="fas fa-file-pdf pdf-icon"></i></button>
+              <button @click="descargarPdfOperador(orden.id, orden.numero_orden)">Imprimir Sin costos <i class="fas fa-file-pdf pdf-icon"></i></button>
             </td>
           </tr>
         </tbody>
@@ -181,8 +181,8 @@
         <button v-if="detalleOrden?.estado === 'Pendiente' || detalleOrden?.estado === 'Lista para Producción'" @click="eliminarOrden(detalleOrden.id)" class="btn btn-danger">
           Eliminar Orden
         </button>
-        <button @click="descargarPdf(detalleOrden?.id)">Imprimir <i class="fas fa-file-pdf pdf-icon"></i></button>
-        <button @click="descargarPdfOperador(detalleOrden?.id)">Imprimir Sin costos <i class="fas fa-file-pdf pdf-icon"></i></button>
+        <button @click="descargarPdf(detalleOrden?.id, detalleOrden?.numero_orden)">Imprimir <i class="fas fa-file-pdf pdf-icon"></i></button>
+        <button @click="descargarPdfOperador(detalleOrden?.id, detalleOrden?.numero_orden)">Imprimir Sin costos <i class="fas fa-file-pdf pdf-icon"></i></button>
       </div>
 
       <!-- Información general -->
@@ -785,15 +785,17 @@ export default {
       }
     },
 
-    async descargarPdf(ordenId) {
+    async descargarPdf(ordenId, numeroOrden) {
       try {
+        // Fallback si numeroOrden no está definido
+        const nombreArchivo = numeroOrden ? `Orden_${numeroOrden}.pdf` : `Orden_${ordenId}.pdf`;
         const response = await apiClient.get(`/api/ordenes-produccion/${ordenId}/pdf`, {
-          responseType: "blob", // Importante para manejar archivos binarios
+          responseType: "blob",
         });
         const url = window.URL.createObjectURL(new Blob([response.data]));
         const link = document.createElement("a");
         link.href = url;
-        link.setAttribute("download", `Orden_${ordenId}.pdf`);
+        link.setAttribute("download", nombreArchivo);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -803,15 +805,17 @@ export default {
       }
     },
 
-    async descargarPdfOperador(ordenId) {
+    async descargarPdfOperador(ordenId, numeroOrden) {
       try {
+        // Fallback si numeroOrden no está definido
+        const nombreArchivo = numeroOrden ? `Orden_${numeroOrden}_Operador.pdf` : `Orden_${ordenId}_Operador.pdf`;
         const response = await apiClient.get(`/api/ordenes-produccion/${ordenId}/pdf-operador`, {
           responseType: "blob",
         });
         const url = window.URL.createObjectURL(new Blob([response.data]));
         const link = document.createElement("a");
         link.href = url;
-        link.setAttribute("download", `Orden_${ordenId}_Operador.pdf`);
+        link.setAttribute("download", nombreArchivo);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
