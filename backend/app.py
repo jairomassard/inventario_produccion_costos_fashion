@@ -4181,7 +4181,7 @@ def create_app():
         try:
             data = request.get_json()
             nuevo_estado = data.get("nuevo_estado")
-            usuario_id = data.get("usuario_id")  # ID del usuario operador
+            usuario_id = data.get("usuario_id")
 
             estados_validos = ["Pendiente", "Lista para Producción", "En Producción", "En Producción-Parcial", "Finalizada"]
             if not nuevo_estado or nuevo_estado not in estados_validos:
@@ -4191,33 +4191,47 @@ def create_app():
             if not orden:
                 return jsonify({"error": "Orden de producción no encontrada."}), 404
 
-            # 🚨 Validar si hay suficiente inventario antes de cambiar a "Lista para Producción"
+            # Validar inventario y recalcular costos al pasar a "Lista para Producción"
             if nuevo_estado == "Lista para Producción":
                 materiales_necesarios = db.session.query(
                     MaterialProducto.producto_base_id, MaterialProducto.cantidad
                 ).filter(MaterialProducto.producto_compuesto_id == orden.producto_compuesto_id).all()
 
+                # Validar inventario
                 for producto_base_id, cantidad_por_paquete in materiales_necesarios:
-                    # 🔹 Cantidad total necesaria = cantidad requerida por paquete * total de paquetes en la orden
-                    cantidad_total_requerida = cantidad_por_paquete * orden.cantidad_paquetes
-
-                    # 🔍 Obtener el stock disponible en la bodega de producción
+                    cantidad_total_requerida = float(cantidad_por_paquete) * float(orden.cantidad_paquetes)
                     inventario_disponible = db.session.query(
                         EstadoInventario.cantidad
                     ).filter(
                         EstadoInventario.producto_id == producto_base_id,
                         EstadoInventario.bodega_id == orden.bodega_produccion_id
-                    ).scalar() or 0  # Si no encuentra, asumir 0
-
+                    ).scalar() or 0
                     if inventario_disponible < cantidad_total_requerida:
-                        # 🔍 Obtener el código del producto en vez de solo mostrar su ID
                         codigo_producto = db.session.query(Producto.codigo).filter(Producto.id == producto_base_id).scalar()
-                        
                         return jsonify({
                             "error": f"El producto con código '{codigo_producto}' no tiene suficiente inventario en la bodega de producción. Se requieren {cantidad_total_requerida}, pero solo hay {inventario_disponible}."
                         }), 400
 
-            # ⏳ Registrar fechas y el operador si el estado cambia
+                # Recalcular costos
+                costo_total_materiales = 0
+                for producto_base_id, cantidad_por_paquete in materiales_necesarios:
+                    ultimo_kardex = Kardex.query.filter_by(
+                        producto_id=producto_base_id,
+                        bodega_destino_id=orden.bodega_produccion_id
+                    ).order_by(Kardex.fecha.desc()).first()
+                    costo_unitario = float(ultimo_kardex.saldo_costo_unitario) if ultimo_kardex else 0.0
+                    cantidad_requerida = float(cantidad_por_paquete) * float(orden.cantidad_paquetes)
+                    costo_material = costo_unitario * cantidad_requerida
+                    costo_total_materiales += costo_material
+
+                # Calcular costo unitario del producto compuesto
+                costo_unitario_compuesto = costo_total_materiales / float(orden.cantidad_paquetes) if orden.cantidad_paquetes > 0 else 0.0
+
+                # Actualizar costos en la orden
+                orden.costo_unitario = costo_unitario_compuesto
+                orden.costo_total = costo_total_materiales
+
+            # Registrar fechas y el operador si el estado cambia
             if nuevo_estado == "Lista para Producción" and not orden.fecha_lista_para_produccion:
                 orden.fecha_lista_para_produccion = obtener_hora_colombia()
 
@@ -4225,7 +4239,7 @@ def create_app():
                 if not orden.fecha_inicio:
                     orden.fecha_inicio = obtener_hora_colombia()
                 if usuario_id:
-                    orden.en_produccion_por = usuario_id  # Guardar quién inicia la producción
+                    orden.en_produccion_por = usuario_id
 
             if nuevo_estado == "Finalizada" and not orden.fecha_finalizacion:
                 orden.fecha_finalizacion = obtener_hora_colombia()
@@ -4233,10 +4247,15 @@ def create_app():
             orden.estado = nuevo_estado
             db.session.commit()
 
-            return jsonify({"message": f"Estado actualizado a {nuevo_estado} correctamente."}), 200
+            return jsonify({
+                "message": f"Estado actualizado a {nuevo_estado} correctamente.",
+                "costo_unitario": float(orden.costo_unitario or 0),
+                "costo_total": float(orden.costo_total or 0)
+            }), 200
 
         except Exception as e:
             print(f"Error al actualizar estado: {str(e)}")
+            db.session.rollback()
             return jsonify({"error": "Ocurrió un error al actualizar el estado."}), 500
 
 
