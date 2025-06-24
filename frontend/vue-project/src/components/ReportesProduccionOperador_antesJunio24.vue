@@ -41,9 +41,9 @@
     </section>
 
     <!-- Tabla de órdenes -->
-    <section v-if="tablaOrdenesVisible">
-      <h2 v-if="ordenes.length > 0">Órdenes de Producción</h2>
-      <table v-if="ordenes.length > 0">
+    <section v-if="ordenes.length > 0">
+      <h2>Órdenes de Producción</h2>
+      <table>
         <thead>
           <tr>
             <th>ID</th>
@@ -70,10 +70,11 @@
           </tr>
         </tbody>
       </table>
-      <p v-if="ordenes.length === 0 && filtroEstado !== '' && filtroNumeroOrden === ''">No se encontraron órdenes de producción.</p>
     </section>
 
-    
+    <p v-if="ordenes.length === 0 && filtroEstado !== '' && filtroNumeroOrden === ''">
+      No se encontraron órdenes de producción.
+    </p>
 
     <!-- Detalle de la orden -->
     <section v-if="mostrarDetalle" class="detalle-orden">
@@ -191,7 +192,6 @@ export default {
       componentes: [],
       historialEntregas: [],
       mostrarDetalle: false,
-      tablaOrdenesVisible: true, // Añadir esta línea
     };
   },
   methods: {
@@ -216,7 +216,6 @@ export default {
       this.componentes = [];
       this.historialEntregas = [];
       this.mostrarDetalle = false;
-      this.tablaOrdenesVisible = true; // Añadir esta línea
     },
     obtenerFechaEstado(orden) {
       switch (orden.estado) {
@@ -248,8 +247,7 @@ export default {
         const response = await apiClient.get("/api/ordenes-produccion/filtrar", { params });
         this.ordenes = response.data.sort((a, b) => b.id - a.id);
         this.mostrarDetalle = false;
-        this.detalleOrden = {};
-        this.tablaOrdenesVisible = true; // Añadir esta línea
+        this.detalleOrden = null;
       } catch (error) {
         console.error("Error al consultar órdenes de producción:", error);
         alert("No se pudieron consultar las órdenes de producción.");
@@ -298,7 +296,6 @@ export default {
         const historialResponse = await apiClient.get(`/api/ordenes-produccion/${ordenId}/historial-entregas`);
         this.historialEntregas = historialResponse.data.historial || [];
         this.mostrarDetalle = true;
-        this.tablaOrdenesVisible = false; // Añadir esta línea
       } catch (error) {
         console.error("Error al cargar detalle de la orden:", error);
         alert("No se pudo cargar el detalle de la orden.");

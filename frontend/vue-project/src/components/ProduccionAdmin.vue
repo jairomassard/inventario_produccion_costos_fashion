@@ -122,48 +122,50 @@
       </div>
 
       <!-- Tabla de órdenes de producción -->
-      <table v-if="ordenes.length > 0">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Número de Orden</th>
-            <th>Producto</th>
-            <th>Cantidad a Producir</th>
-            <th>Estado</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="orden in ordenes" :key="orden.id">
-            <td>{{ orden.id }}</td>
-            <td>{{ orden.numero_orden }}</td>
-            <td>{{ orden.producto_compuesto_nombre }}</td>
-            <td>{{ orden.cantidad_paquetes }}</td>
-            <td>{{ orden.estado }}</td>
-            <td>
-              <button v-if="orden.estado === 'Pendiente'" @click="actualizarEstado(orden.id, 'Lista para Producción')">
-                Marcar Lista para Producción
-              </button>
-              <button v-if="orden.estado === 'Lista para Producción'" @click="actualizarEstado(orden.id, 'En Producción')">
-                Iniciar Producción
-              </button>
-              <button v-if="orden.estado === 'En Producción' || orden.estado === 'En Producción-Parcial'" @click="registrarProduccion(orden.id)">
-                Registrar Producción
-              </button>
-              <button v-if="orden.estado === 'Pendiente' || orden.estado === 'Lista para Producir'"
-                      @click="eliminarOrden(orden.id)" class="btn btn-danger">
-                Eliminar Orden
-              </button>
-              <button @click="cargarDetalleOrden(orden.id)">Detalle</button>
-              <button @click="descargarPdf(orden.id, orden.numero_orden)">Imprimir <i class="fas fa-file-pdf pdf-icon"></i></button>
-              <button @click="descargarPdfOperador(orden.id, orden.numero_orden)">Imprimir Sin costos <i class="fas fa-file-pdf pdf-icon"></i></button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-if="tablaOrdenesVisible">
+        <table v-if="ordenes.length > 0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Número de Orden</th>
+              <th>Producto</th>
+              <th>Cantidad a Producir</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="orden in ordenes" :key="orden.id">
+              <td>{{ orden.id }}</td>
+              <td>{{ orden.numero_orden }}</td>
+              <td>{{ orden.producto_compuesto_nombre }}</td>
+              <td>{{ orden.cantidad_paquetes }}</td>
+              <td>{{ orden.estado }}</td>
+              <td>
+                <button v-if="orden.estado === 'Pendiente'" @click="actualizarEstado(orden.id, 'Lista para Producción')">
+                  Marcar Lista para Producción
+                </button>
+                <button v-if="orden.estado === 'Lista para Producción'" @click="actualizarEstado(orden.id, 'En Producción')">
+                  Iniciar Producción
+                </button>
+                <button v-if="orden.estado === 'En Producción' || orden.estado === 'En Producción-Parcial'" @click="registrarProduccion(orden.id)">
+                  Registrar Producción
+                </button>
+                <button v-if="orden.estado === 'Pendiente' || orden.estado === 'Lista para Producir'"
+                        @click="eliminarOrden(orden.id)" class="btn btn-danger">
+                  Eliminar Orden
+                </button>
+                <button @click="cargarDetalleOrden(orden.id)">Detalle</button>
+                <button @click="descargarPdf(orden.id, orden.numero_orden)">Imprimir <i class="fas fa-file-pdf pdf-icon"></i></button>
+                <button @click="descargarPdfOperador(orden.id, orden.numero_orden)">Imprimir Sin costos <i class="fas fa-file-pdf pdf-icon"></i></button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
-      <p v-if="ordenes.length === 0">No se encontraron órdenes de producción.</p>
-    </section>
+        <p v-if="ordenes.length === 0">No se encontraron órdenes de producción.</p>
+      </div>
+     </section>
 
     <section v-if="tablaDetalleVisible" class="detalle-orden">
       <h2>Detalle de la Orden</h2>
@@ -371,6 +373,7 @@ export default {
       mostrarDetalle: false,
       cierreForzadoHabilitado: false,  // Controla si se muestra el textarea
       comentarioCierreForzado: "",  // Almacena el comentario del usuario
+      tablaOrdenesVisible: true, // Añadir esta línea
     };
   },
   methods: {
@@ -418,6 +421,7 @@ export default {
       this.mostrarDetalle = false;
       this.cierreForzadoHabilitado = false;
       this.comentarioCierreForzado = "";
+      this.tablaOrdenesVisible = true; // Añadir esta línea
 
       // ✅ Recargar los productos y bodegas para mantener actualizados los datos disponibles
       this.cargarProductosCompuestos();
@@ -486,6 +490,7 @@ export default {
 
         this.mostrarDetalle = false; // Ocultar la sección de detalles al consultar órdenes
         this.detalleOrden = {}; // Limpiar los datos del detalle
+        this.tablaOrdenesVisible = true; // Añadir esta línea
       } catch (error) {
         console.error("Error al consultar órdenes de producción:", error);
         alert("No se pudieron consultar las órdenes de producción.");
@@ -621,6 +626,7 @@ export default {
         this.cantidadPendiente = historialResponse.data.cantidad_pendiente || 0;
 
         this.tablaDetalleVisible = true;
+        this.tablaOrdenesVisible = false; // Añadir esta línea
       } catch (error) {
         console.error("Error al cargar detalle de la orden:", error);
         alert("No se pudo cargar el detalle de la orden.");
